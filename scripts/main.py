@@ -1,67 +1,85 @@
-import time
+import csv
+import json
+import os
 
-from utils import geocode_tk, haversine_distance, road_distance
 from commute_analysis import (
     analyze_student_commutes,
     monte_carlo_unnecessary_trips_co2,
-    sensitivity_analysis_total_co2,
-    unnecessary_trips_co2_by_course,
 )
 
-
 if __name__ == "__main__":
-    tk_home = "12243"
-    tk_university = "12241"
+    print("=====================================================")
+    print(" STUDENT ROUTING & ENVIRONMENTAL FOOTPRINT ANALYSIS  ")
+    print("=====================================================\n")
+    
+    # 1. Load Configuration
+    config_path = os.path.join(os.path.dirname(__file__), '..', 'config.json')
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+    except Exception as e:
+        print(f"Error loading config.json: {e}")
+        exit(1)
+        
+    university_tk = config["data"]["university_tk"]
+    csv_path = os.path.join(os.path.dirname(__file__), '..', config["data"]["students_csv_path"])
+    
+    # 2. Load Student Data
+    students = []
+    try:
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                row["bathmos"] = float(row["bathmos"])
+                students.append(row)
+    except Exception as e:
+        print(f"Error loading {csv_path}: {e}")
+        exit(1)
 
-    print(f"Geocoding: {tk_home} -> {tk_university}")
-    coord_home = geocode_tk(tk_home)
-    time.sleep(1)
-    coord_university = geocode_tk(tk_university)
+    max_grade = config["policy"]["max_unnecessary_grade"]
+    marginal_emissions = config["policy"]["use_marginal_pt_emissions"]
+    n_sims = config["simulation"]["n_simulations"]
 
-    if coord_home and coord_university:
-        straight = haversine_distance(coord_home, coord_university)
-        print(f"Straight-line distance (haversine): {straight:.2f} km")
-
-        road = road_distance(coord_home, coord_university)
-        if road is not None:
-            print(f"Road distance (OSRM):               {road:.2f} km")
-            print(f"Road/straight-line ratio:            {road/straight:.2f}x")
-        else:
-            print("Could not calculate road distance.")
-    else:
-        print("Could not calculate distance (a postal code was not found).")
-
-    print()
-    students = [
-        {"onoma_mathimatos": "Statistics", "tk": "12243", "bathmos": 0},
-        {"onoma_mathimatos": "Databases", "tk": "18863", "bathmos": 7},
-        {"onoma_mathimatos": "Machine Learning", "tk": "15772", "bathmos": 1},
-    ]
-    university_tk = "12241"
-
-    analyzed = analyze_student_commutes(students, university_tk)
-
-    for record in analyzed:
-        print(record)
-
-    print()
-    print("Expected CO2eq (kg) from unnecessary trips, by course:")
-    for course_name, co2_kg in unnecessary_trips_co2_by_course(analyzed).items():
-        print(f"  {course_name}: {co2_kg:.2f} kg")
-
-    print()
-    print("Monte Carlo simulation (1000 runs), by course:")
-    monte_carlo_summary = monte_carlo_unnecessary_trips_co2(analyzed, n_simulations=1000, random_seed=42)
-    for course_name, stats in monte_carlo_summary.items():
-        print(f"  {course_name}: mean={stats['mean_kg']:.2f} kg, std={stats['std_kg']:.2f} kg, "
-              f"p5={stats['p5_kg']:.2f} kg, p95={stats['p95_kg']:.2f} kg")
-
-    print()
-    print("Sensitivity analysis (total CO2eq kg across all unnecessary trips):")
-    sensitivity_results = sensitivity_analysis_total_co2(
-        analyzed,
-        midpoint_values_km=[5.0, 8.0, 12.0],
-        steepness_values=[0.2, 0.3, 0.5],
+    print(f"[*] Loaded configuration from config.json")
+    print(f"[*] Loaded {len(students)} student records from {config['data']['students_csv_path']}")
+    print(f"[*] Policy: Trips with exam grades <= {max_grade} are considered 'unnecessary'.")
+    print(f"[*] Emissions: Using {'marginal (0 gCO2)' if marginal_emissions else 'average (~60 gCO2)'} emissions for public transport.\n")
+    
+    # 3. Analyze Commutes
+    analyzed = analyze_student_commutes(
+        students, 
+        university_tk, 
+        max_unnecessary_grade=max_grade,
+        use_marginal_pt_emissions=marginal_emissions
     )
-    for (midpoint_km, steepness), total_co2_kg in sensitivity_results.items():
-        print(f"  midpoint={midpoint_km}km, steepness={steepness}: {total_co2_kg:.2f} kg")
+    
+    # 4. Extract and display unnecessary trips
+    print("--- IDENTIFIED UNNECESSARY TRIPS ---")
+    unnecessary_records = [r for r in analyzed if r["unnecessary_trip"]]
+    
+    if not unnecessary_records:
+        print("  No unnecessary trips found based on the current policy threshold.")
+    else:
+        for record in unnecessary_records:
+            probs = record["mode_probabilities"]
+            dist_str = f"{record['one_way_distance_km']:.1f} km" if record['one_way_distance_km'] else "Unknown"
+            print(f"  Student: {record['student_id']:<6} | Course: {record['onoma_mathimatos']:<18} | Grade: {record['bathmos']} | Distance: {dist_str:<8} | "
+                  f"Est. Mode: PT ({probs['public_transport']:.0%}), Car ({probs['car']:.0%}), Walk ({probs['walk_cycle']:.0%})")
+
+    # 5. Monte Carlo Simulation for robust estimates
+    print("\n--- ENVIRONMENTAL IMPACT REPORT ---")
+    print(f"[*] Running {n_sims:,} Monte Carlo simulations to calculate statistical footprint distributions...")
+    
+    monte_carlo_summary = monte_carlo_unnecessary_trips_co2(
+        analyzed, n_simulations=n_sims, random_seed=config["simulation"]["random_seed"], use_marginal_pt_emissions=marginal_emissions
+    )
+    
+    total_mean = sum(stats['mean_kg'] for stats in monte_carlo_summary.values())
+    print(f"\n=> TOTAL ESTIMATED CO2 EMISSIONS: {total_mean:.2f} kg CO2eq <=")
+    print("\nBreakdown by Course (95% Confidence Intervals):")
+    
+    for course_name, stats in monte_carlo_summary.items():
+        print(f"  - {course_name}: {stats['mean_kg']:.2f} kg "
+              f"(Range: {stats['p5_kg']:.2f} kg -> {stats['p95_kg']:.2f} kg)")
+
+    print("\n[Analysis Complete]")

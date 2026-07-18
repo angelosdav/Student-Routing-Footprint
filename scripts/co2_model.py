@@ -4,7 +4,9 @@ of commuting by car (given distance), and expected CO2eq calculation
 (weighted average over car and public_transport).
 """
 
+import json
 import math
+import os
 
 
 # Average emission factors (grams of CO2eq per km per passenger), based on
@@ -17,16 +19,25 @@ import math
 #     not known
 CO2_EMISSION_FACTORS_G_PER_KM = {
     "car": 170,
-    "public_transport": 60,
+    "public_transport_average": 60,
+    "public_transport_marginal": 0,  # 0 if the bus/train runs regardless of the student
+    "walk_cycle": 0,
 }
 
-# Sigmoid parameters for estimating the probability that a student commuted
-# by car, based purely on distance (the actual mode of transport is unknown).
-# MIDPOINT_KM: distance at which p_car = 0.5
-# STEEPNESS: how sharply the probability shifts from public_transport to car
-# as distance increases. Tune these based on domain knowledge.
-P_CAR_MIDPOINT_KM = 8.0
-P_CAR_STEEPNESS = 0.3
+# Load MNL parameters from config.json (fallback to defaults if missing)
+config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
+try:
+    with open(config_path, 'r', encoding='utf-8') as f:
+        _config = json.load(f)
+        MNL_BETA_TIME = _config["mnl_model"]["beta_time"]
+        MNL_ASC_CAR = _config["mnl_model"]["asc_car"]
+        MNL_ASC_PT = _config["mnl_model"]["asc_pt"]
+        MNL_ASC_WALK = _config["mnl_model"]["asc_walk"]
+except Exception:
+    MNL_BETA_TIME = -0.05
+    MNL_ASC_CAR = 0.5
+    MNL_ASC_PT = 1.5
+    MNL_ASC_WALK = 2.5
 
 # Students travel to the exam and back, so total distance traveled is
 # double the one-way distance between their postal code and the exam
@@ -34,37 +45,65 @@ P_CAR_STEEPNESS = 0.3
 ROUND_TRIP_MULTIPLIER = 2
 
 
-def p_car_given_distance(distance_km: float, midpoint_km: float = P_CAR_MIDPOINT_KM,
-                          steepness: float = P_CAR_STEEPNESS) -> float:
+def get_transport_mode_probabilities(distance_km: float, 
+                                     driving_duration_min: float | None = None,
+                                     beta_time: float = MNL_BETA_TIME) -> dict[str, float]:
     """
-    Estimates the probability that a student commuted by car, as a function
-    of distance, using a logistic (sigmoid) curve. Close to the university,
-    p_car is low (students tend to use public transport); far from the
-    university, p_car approaches 1 (public transport becomes too time
-    consuming). Around midpoint_km, p_car = 0.5.
+    Estimates the probability distribution of commuting by car, public transport,
+    and walking/cycling using a Multinomial Logit (MNL) utility model based on
+    estimated travel times. This is the industry standard for transport modeling.
     """
-    return 1 / (1 + math.exp(-steepness * (distance_km - midpoint_km)))
+    if driving_duration_min is None:
+        # Estimate driving duration assuming ~30 km/h average speed in urban areas
+        driving_duration_min = (distance_km / 30.0) * 60.0
+
+    # 1. Estimate travel times (in minutes) for each mode
+    t_car = driving_duration_min
+    t_walk = (distance_km / 5.0) * 60.0  # Assumes 5 km/h walking speed
+    t_pt = t_car * 1.5 + 15.0            # PT is typically 1.5x driving time + 15 mins for waiting/walking
+
+    # 2. Calculate Utilities (V) for each mode
+    v_car = beta_time * t_car + MNL_ASC_CAR
+    v_pt = beta_time * t_pt + MNL_ASC_PT
+    v_walk = beta_time * t_walk + MNL_ASC_WALK
+
+    # 3. Calculate probabilities using the Logit formula: exp(V_i) / sum(exp(V_j))
+    # Cap utilities to prevent math overflow in extreme cases
+    max_v = max(v_car, v_pt, v_walk)
+    exp_car = math.exp(v_car - max_v)
+    exp_pt = math.exp(v_pt - max_v)
+    exp_walk = math.exp(v_walk - max_v)
+    
+    total_exp = exp_car + exp_pt + exp_walk
+
+    return {
+        "car": exp_car / total_exp,
+        "public_transport": exp_pt / total_exp,
+        "walk_cycle": exp_walk / total_exp
+    }
 
 
-def calculate_expected_co2_kg(one_way_distance_km: float | None) -> float | None:
+def calculate_expected_co2_kg(one_way_distance_km: float | None, 
+                              driving_duration_min: float | None = None,
+                              use_marginal_pt_emissions: bool = False) -> float | None:
     """
     Calculates the EXPECTED CO2eq footprint (in kg) of a ROUND TRIP (there
-    and back), given the one-way distance in km. Since the actual mode of
-    transport is unknown, this is a weighted average of the car and
-    public_transport emission factors, weighted by
-    p_car_given_distance(one_way_distance_km) - the mode choice is assumed
-    to depend on the one-way distance, while the emissions are calculated
-    over the full round-trip distance.
+    and back), given the one-way distance in km and driving duration.
+
+    use_marginal_pt_emissions: if True, assumes public transport would run anyway (0 additional emissions).
 
     Returns None if the distance is unknown.
     """
     if one_way_distance_km is None:
         return None
 
-    p_car = p_car_given_distance(one_way_distance_km)
+    probs = get_transport_mode_probabilities(one_way_distance_km, driving_duration_min)
     round_trip_distance_km = one_way_distance_km * ROUND_TRIP_MULTIPLIER
 
-    co2_car_kg = (round_trip_distance_km * CO2_EMISSION_FACTORS_G_PER_KM["car"]) / 1000
-    co2_public_transport_kg = (round_trip_distance_km * CO2_EMISSION_FACTORS_G_PER_KM["public_transport"]) / 1000
+    pt_emission_key = "public_transport_marginal" if use_marginal_pt_emissions else "public_transport_average"
 
-    return p_car * co2_car_kg + (1 - p_car) * co2_public_transport_kg
+    co2_car_kg = (round_trip_distance_km * CO2_EMISSION_FACTORS_G_PER_KM["car"]) / 1000
+    co2_public_transport_kg = (round_trip_distance_km * CO2_EMISSION_FACTORS_G_PER_KM[pt_emission_key]) / 1000
+    co2_walk_kg = (round_trip_distance_km * CO2_EMISSION_FACTORS_G_PER_KM["walk_cycle"]) / 1000
+
+    return probs["car"] * co2_car_kg + probs["public_transport"] * co2_public_transport_kg + probs["walk_cycle"] * co2_walk_kg

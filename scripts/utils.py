@@ -68,24 +68,14 @@ def geocode_tk_photon(tk: str, country: str = "Greece") -> tuple[float, float] |
     return lat, lon
 
 
-def road_distance(coord1: tuple[float, float], coord2: tuple[float, float],
-                   profile: str = "driving") -> float | None:
+def road_route_details(coord1: tuple[float, float], coord2: tuple[float, float],
+                       profile: str = "driving") -> tuple[float, float] | None:
     """
-    Calculates the ACTUAL road distance (not straight-line) via the free
-    public OSRM server, based on the real road network.
-
-    coord1, coord2: (lat, lon)
-    profile: "driving", "walking", or "cycling"
-
-    Note: the public OSRM demo server (router.project-osrm.org) is not
-    intended for production/heavy use, it has informal rate limits. For
-    bulk execution across many students, it's better to set up your own
-    OSRM instance (docker) or use a paid provider (e.g. OpenRouteService, Mapbox).
+    Returns (distance_km, duration_minutes) via OSRM.
     """
     lat1, lon1 = coord1
     lat2, lon2 = coord2
 
-    # OSRM expects lon,lat (reversed from the usual order!)
     url = f"http://router.project-osrm.org/route/v1/{profile}/{lon1},{lat1};{lon2},{lat2}"
     params = {"overview": "false"}
 
@@ -97,8 +87,19 @@ def road_distance(coord1: tuple[float, float], coord2: tuple[float, float],
         print("  -> Route not found")
         return None
 
-    distance_meters = data["routes"][0]["distance"]
-    return distance_meters / 1000  # -> km
+    distance_km = data["routes"][0]["distance"] / 1000
+    duration_min = data["routes"][0]["duration"] / 60
+    return distance_km, duration_min
+
+
+def road_distance(coord1: tuple[float, float], coord2: tuple[float, float],
+                   profile: str = "driving") -> float | None:
+    """
+    Calculates the ACTUAL road distance (not straight-line) via the free
+    public OSRM server, based on the real road network.
+    """
+    res = road_route_details(coord1, coord2, profile)
+    return res[0] if res else None
 
 
 def haversine_distance(coord1: tuple[float, float], coord2: tuple[float, float]) -> float:
@@ -134,3 +135,15 @@ def distance_between_postal_codes(tk1: str, tk2: str) -> float | None:
         return None
 
     return haversine_distance(coord1, coord2)
+
+
+def anonymize_postal_code(tk: str, digits_to_keep: int = 3) -> str:
+    """
+    Anonymizes a postal code by keeping only the first N digits and masking the rest.
+    In Greece, the first 3 digits usually denote a broader region/municipality,
+    which helps preserve privacy while still allowing for rough distance estimation.
+    For example: "12243" -> "122**"
+    """
+    if not tk or len(tk) < digits_to_keep:
+        return tk
+    return tk[:digits_to_keep] + "*" * (len(tk) - digits_to_keep)

@@ -16,12 +16,12 @@ from co2_model import (
     CO2_EMISSION_FACTORS_G_PER_KM,
     ROUND_TRIP_MULTIPLIER,
     calculate_expected_co2_kg,
-    p_car_given_distance,
+    get_transport_mode_probabilities,
 )
-from utils import geocode_tk, haversine_distance, road_distance
+from utils import geocode_tk, haversine_distance, road_distance, road_route_details
 
 
-def analyze_student_commutes(students: list[dict], university_tk: str) -> list[dict]:
+def analyze_student_commutes(students: list[dict], university_tk: str, max_unnecessary_grade: float = 1.0, use_marginal_pt_emissions: bool = False) -> list[dict]:
     """
     students: list of dicts, each with keys:
         - "onoma_mathimatos": str
@@ -29,13 +29,15 @@ def analyze_student_commutes(students: list[dict], university_tk: str) -> list[d
         - "bathmos": int or float
 
     university_tk: postal code of the exam location
+    max_unnecessary_grade: The threshold at which a trip is deemed "unnecessary" (<= max_unnecessary_grade)
+    use_marginal_pt_emissions: if True, assumes public transport would run anyway (0 emissions).
 
     Returns a new list of dicts, each with the original keys plus:
         - "straight_distance_km": float or None
         - "road_distance_km": float or None
+        - "driving_duration_min": float or None
         - "unnecessary_trip": bool
-        - "p_car": float or None (estimated probability the trip was by car,
-          based on the one-way distance)
+        - "mode_probabilities": dict or None (estimated probability distribution for walk, pt, car)
         - "one_way_distance_km": float or None (the distance actually used
           for the CO2 calculation: road_distance_km, or straight_distance_km
           as a fallback)
@@ -60,22 +62,26 @@ def analyze_student_commutes(students: list[dict], university_tk: str) -> list[d
 
         straight_distance_km = None
         road_distance_km = None
+        driving_duration_min = None
         if student_coords and university_coords:
             straight_distance_km = haversine_distance(student_coords, university_coords)
-            road_distance_km = road_distance(student_coords, university_coords)
+            route = road_route_details(student_coords, university_coords)
+            if route:
+                road_distance_km, driving_duration_min = route
 
-        unnecessary_trip = student["bathmos"] in (0, 1)
+        unnecessary_trip = student["bathmos"] <= max_unnecessary_grade
 
         distance_for_co2 = road_distance_km if road_distance_km is not None else straight_distance_km
-        p_car = p_car_given_distance(distance_for_co2) if distance_for_co2 is not None else None
-        expected_co2_kg = calculate_expected_co2_kg(distance_for_co2)
+        probs = get_transport_mode_probabilities(distance_for_co2, driving_duration_min) if distance_for_co2 is not None else None
+        expected_co2_kg = calculate_expected_co2_kg(distance_for_co2, driving_duration_min, use_marginal_pt_emissions=use_marginal_pt_emissions)
 
         results.append({
             **student,
             "straight_distance_km": straight_distance_km,
             "road_distance_km": road_distance_km,
+            "driving_duration_min": driving_duration_min,
             "unnecessary_trip": unnecessary_trip,
-            "p_car": p_car,
+            "mode_probabilities": probs,
             "one_way_distance_km": distance_for_co2,
             "expected_co2_kg": expected_co2_kg,
         })
@@ -111,13 +117,13 @@ def _percentile(sorted_values: list[float], pct: float) -> float:
 
 
 def monte_carlo_unnecessary_trips_co2(records: list[dict], n_simulations: int = 1000,
-                                       random_seed: int | None = None) -> dict[str, dict]:
+                                       random_seed: int | None = None, use_marginal_pt_emissions: bool = False) -> dict[str, dict]:
     """
     Runs a Monte Carlo simulation to estimate the CO2eq footprint (in kg) of
     unnecessary trips, grouped by course name. Instead of using the expected
     value (a fixed weighted average), each simulation randomly samples each
-    student's mode of transport (car or public_transport) based on their
-    p_car probability, then sums up the resulting CO2 per course. Running
+    student's mode of transport (car, public_transport, or walk_cycle) based on their
+    probabilities, then sums up the resulting CO2 per course. Running
     many simulations gives a distribution of plausible totals instead of a
     single point estimate.
 
@@ -133,7 +139,7 @@ def monte_carlo_unnecessary_trips_co2(records: list[dict], n_simulations: int = 
     relevant_records = [
         record for record in records
         if record["unnecessary_trip"]
-        and record["p_car"] is not None
+        and record.get("mode_probabilities") is not None
         and record["one_way_distance_km"] is not None
     ]
 
@@ -145,8 +151,17 @@ def monte_carlo_unnecessary_trips_co2(records: list[dict], n_simulations: int = 
 
         for record in relevant_records:
             round_trip_distance_km = record["one_way_distance_km"] * ROUND_TRIP_MULTIPLIER
-            used_car = rng.random() < record["p_car"]
-            emission_factor_g_per_km = CO2_EMISSION_FACTORS_G_PER_KM["car" if used_car else "public_transport"]
+            probs = record["mode_probabilities"]
+            
+            r = rng.random()
+            if r < probs["walk_cycle"]:
+                mode = "walk_cycle"
+            elif r < probs["walk_cycle"] + probs["public_transport"]:
+                mode = "public_transport_marginal" if use_marginal_pt_emissions else "public_transport_average"
+            else:
+                mode = "car"
+
+            emission_factor_g_per_km = CO2_EMISSION_FACTORS_G_PER_KM[mode]
             co2_kg = (round_trip_distance_km * emission_factor_g_per_km) / 1000
             run_totals[record["onoma_mathimatos"]] += co2_kg
 
@@ -166,19 +181,17 @@ def monte_carlo_unnecessary_trips_co2(records: list[dict], n_simulations: int = 
     return summary
 
 
-def sensitivity_analysis_total_co2(records: list[dict], midpoint_values_km: list[float],
-                                    steepness_values: list[float]) -> dict[tuple[float, float], float]:
+def sensitivity_analysis_total_co2(records: list[dict], beta_time_values: list[float],
+                                    use_marginal_pt_emissions: bool = False) -> dict[float, float]:
     """
     Recomputes the total expected CO2eq (kg) across ALL unnecessary trips,
-    for a grid of P_CAR_MIDPOINT_KM / P_CAR_STEEPNESS values, to see how
-    sensitive the total is to these assumptions (which were not derived
-    from real data).
+    for a list of beta_time values (sensitivity to travel time), to see how
+    sensitive the total is to the MNL time preference assumption.
 
     records: output of analyze_student_commutes
-    midpoint_values_km: list of P_CAR_MIDPOINT_KM values to try
-    steepness_values: list of P_CAR_STEEPNESS values to try
+    beta_time_values: list of MNL_BETA_TIME values to try
 
-    Returns a dict mapping (midpoint_km, steepness) -> total_co2_kg
+    Returns a dict mapping beta_time -> total_co2_kg
     """
     relevant_records = [
         record for record in records
@@ -186,20 +199,23 @@ def sensitivity_analysis_total_co2(records: list[dict], midpoint_values_km: list
     ]
 
     results = {}
-    for midpoint_km in midpoint_values_km:
-        for steepness in steepness_values:
-            total_co2_kg = 0.0
+    for beta_time in beta_time_values:
+        total_co2_kg = 0.0
 
-            for record in relevant_records:
-                one_way_distance_km = record["one_way_distance_km"]
-                p_car = p_car_given_distance(one_way_distance_km, midpoint_km, steepness)
-                round_trip_distance_km = one_way_distance_km * ROUND_TRIP_MULTIPLIER
+        for record in relevant_records:
+            one_way_distance_km = record["one_way_distance_km"]
+            driving_duration_min = record.get("driving_duration_min")
+            
+            probs = get_transport_mode_probabilities(one_way_distance_km, driving_duration_min, beta_time)
+            round_trip_distance_km = one_way_distance_km * ROUND_TRIP_MULTIPLIER
 
-                co2_car_kg = (round_trip_distance_km * CO2_EMISSION_FACTORS_G_PER_KM["car"]) / 1000
-                co2_public_transport_kg = (round_trip_distance_km * CO2_EMISSION_FACTORS_G_PER_KM["public_transport"]) / 1000
+            pt_emission_key = "public_transport_marginal" if use_marginal_pt_emissions else "public_transport_average"
+            co2_car_kg = (round_trip_distance_km * CO2_EMISSION_FACTORS_G_PER_KM["car"]) / 1000
+            co2_pt_kg = (round_trip_distance_km * CO2_EMISSION_FACTORS_G_PER_KM[pt_emission_key]) / 1000
+            co2_walk_kg = (round_trip_distance_km * CO2_EMISSION_FACTORS_G_PER_KM["walk_cycle"]) / 1000
 
-                total_co2_kg += p_car * co2_car_kg + (1 - p_car) * co2_public_transport_kg
+            total_co2_kg += probs["car"] * co2_car_kg + probs["public_transport"] * co2_pt_kg + probs["walk_cycle"] * co2_walk_kg
 
-            results[(midpoint_km, steepness)] = total_co2_kg
+        results[beta_time] = total_co2_kg
 
     return results

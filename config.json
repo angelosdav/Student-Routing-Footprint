@@ -1,13 +1,13 @@
 {
   "policy": {
-    "max_unnecessary_grade": 4.0,
+    "max_unnecessary_grade": 1.0,
     "use_marginal_pt_emissions": false
   },
   "mnl_model": {
     "beta_time": -0.05,
-    "asc_car": 0.5,
-    "asc_pt": 1.5,
-    "asc_walk": 2.5
+    "asc_car": 0.0,
+    "asc_pt": 1.2,
+    "asc_walk": 1.5
   },
   "simulation": {
     "n_simulations": 10000,

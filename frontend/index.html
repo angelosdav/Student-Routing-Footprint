@@ -712,6 +712,7 @@
                         <span class="mode-title">Metro + Bus Transit</span>
                         <span class="card-badge">Logit: ${pctT1}% P(i)</span>
                     </div>
+                    ${t1_totalDur !== 9999 ? `
                     <div class="card-metrics">
                         <div class="metric"><span class="metric-val">${t1_totalDur} min</span><span class="metric-lbl">Total Time</span></div>
                         <div class="metric"><span class="metric-val">${t1_inVehicleTotal} min</span><span class="metric-lbl">In-Vehicle</span></div>
@@ -771,6 +772,14 @@
                             <span class="step-meta">${t1_walk2} min</span>
                         </div>
                     </div>
+                    ` : `
+                    <div class="steps-flow">
+                        <div class="step-row">
+                            <span class="step-tag" style="background:#e11d48">N/A</span>
+                            <span class="step-title-text" style="color: var(--text-muted)">No route found / Service unavailable</span>
+                        </div>
+                    </div>
+                    `}
                 </div>`
                 },
                 {
@@ -785,6 +794,7 @@
                         <span class="mode-title">Direct Bus Line</span>
                         <span class="card-badge">Logit: ${pctT2}% P(i)</span>
                     </div>
+                    ${t2_totalDur !== 9999 ? `
                     <div class="card-metrics">
                         <div class="metric"><span class="metric-val">${t2_totalDur} min</span><span class="metric-lbl">Total Time</span></div>
                         <div class="metric"><span class="metric-val">${t2_inVehicleTotal} min</span><span class="metric-lbl">In-Vehicle</span></div>
@@ -828,6 +838,14 @@
                             <span class="step-meta">${t2_walk2} min</span>
                         </div>
                     </div>
+                    ` : `
+                    <div class="steps-flow">
+                        <div class="step-row">
+                            <span class="step-tag" style="background:#e11d48">N/A</span>
+                            <span class="step-title-text" style="color: var(--text-muted)">No route found / Service unavailable</span>
+                        </div>
+                    </div>
+                    `}
                 </div>`
                 },
                 {

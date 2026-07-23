@@ -82,6 +82,40 @@ def fetch_osrm_route(port, profile, lat1, lon1, lat2, lon2):
         pass
     return None
 
+def fetch_otp_transit_routes(lat1, lon1, lat2, lon2, date_str, time_str):
+    url = 'http://localhost:8080/otp/routers/default/index/graphql'
+    query = f"""
+    {{
+      plan(
+        from: {{ lat: {lat1}, lon: {lon1} }},
+        to: {{ lat: {lat2}, lon: {lon2} }},
+        date: "{date_str}",
+        time: "{time_str}"
+      ) {{
+        itineraries {{
+          duration
+          waitingTime
+          walkTime
+          legs {{
+            mode
+            duration
+            distance
+            transitLeg
+          }}
+        }}
+      }}
+    }}
+    """
+    try:
+        res = requests.post(url, json={'query': query}, timeout=2.5)
+        if res.status_code == 200:
+            data = res.json()
+            if 'data' in data and data['data'].get('plan'):
+                return data['data']['plan'].get('itineraries', [])
+    except Exception:
+        pass
+    return None
+
 def haversine_km(lat1, lon1, lat2, lon2):
     R = 6371.0
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
@@ -114,32 +148,109 @@ def compute_student_route_and_co2(tk, is_peak=True, reverse=False):
     # Fallback to straight line distance if engine fails
     straight_km = haversine_km(lat, lon, DEST_LAT, DEST_LON)
     car_dist_km  = osrm_car['dist_km'] if osrm_car else (straight_km * 1.25)
-    car_dur_min  = osrm_car['dur_min'] if osrm_car else max(4.0, car_dist_km * 2.8)
+    raw_car_min  = osrm_car['dur_min'] if osrm_car else max(4.0, car_dist_km * 2.8)
+    car_multiplier = 1.45 if is_peak else 1.0
+    speed_correction = max(0.60, 1.0 - 0.015 * car_dist_km)
+    car_dur_min  = raw_car_min * car_multiplier * speed_correction
     
     foot_dist_km = osrm_foot['dist_km'] if osrm_foot else (straight_km * 1.15)
-    foot_dur_min = osrm_foot['dur_min'] if osrm_foot else max(3.0, foot_dist_km * 13.0)
+    foot_dur_min = (osrm_foot['dur_min'] * 1.15) if osrm_foot else max(3.0, foot_dist_km * 13.0)
 
+    # Query OpenTripPlanner for real transit itineraries
+    date_str = "2026-07-22"
+    time_str = "08:00" if is_peak else "14:00"
+    
+    otp_itineraries = []
+    if not reverse:
+        otp_itineraries = fetch_otp_transit_routes(lat, lon, DEST_LAT, DEST_LON, date_str, time_str)
+    else:
+        otp_itineraries = fetch_otp_transit_routes(DEST_LAT, DEST_LON, lat, lon, date_str, time_str)
+
+    otp_online = otp_itineraries is not None
+    if otp_itineraries is None:
+        otp_itineraries = []
+
+    # Parse OTP results to find transit1 (Metro + Bus) and transit2 (Direct Bus)
+    t1_otp = None
+    t2_otp = None
+    
+    for itin in otp_itineraries:
+        legs = itin.get('legs', [])
+        has_metro = any(leg['mode'] in ('SUBWAY', 'TRAM', 'RAIL') for leg in legs)
+        has_bus = any(leg['mode'] == 'BUS' for leg in legs)
+        
+        # Calculate emissions
+        co2_g = 0.0
+        for leg in legs:
+            dist_km = leg['distance'] / 1000.0
+            if leg['mode'] == 'BUS':
+                co2_g += dist_km * EF_BUS
+            elif leg['mode'] in ('SUBWAY', 'TRAM', 'RAIL'):
+                co2_g += dist_km * EF_METRO
+        
+        dur_min = itin['duration'] / 60.0
+        wait_min = itin['waitingTime'] / 60.0
+        walk_min = itin['walkTime'] / 60.0
+        in_vehicle_min = max(0.0, dur_min - wait_min - walk_min)
+        
+        if has_metro: # Metro + Bus or Metro only
+            if t1_otp is None or dur_min < t1_otp['dur']:
+                t1_otp = {'dur': dur_min, 'wait': wait_min, 'walk': walk_min, 'in_vehicle': in_vehicle_min, 'co2': co2_g}
+        elif has_bus: # Direct Bus only
+            if t2_otp is None or dur_min < t2_otp['dur']:
+                t2_otp = {'dur': dur_min, 'wait': wait_min, 'walk': walk_min, 'in_vehicle': in_vehicle_min, 'co2': co2_g}
+
+    # Fallback parameters if OTP fails to find routes
     bus_dist_km  = straight_km * 1.15
     moto_dist_km = car_dist_km
     moto_dur_min = car_dur_min * 0.90
 
-    # Wait and travel times
-    metro_wait = 4.0 if is_peak else 6.0
-    bus_wait   = 7.0 if is_peak else 11.0
+    # Wait and travel times defaults
+    metro_wait_def = 4.0 if is_peak else 6.0
+    bus_wait_def   = 7.0 if is_peak else 11.0
 
-    # Transit option metrics
-    t1_in_metro  = max(3.0, straight_km * 1.5)
-    t1_in_bus    = max(4.0, straight_km * 1.8)
-    t1_wait      = metro_wait + bus_wait
-    t1_walk      = 7.0
-    t1_total_dur = t1_walk + t1_wait + t1_in_metro + t1_in_bus
-    t1_co2_grams = round((bus_dist_km * 0.45 * EF_METRO) + (bus_dist_km * 0.55 * EF_BUS))
+    # Transit 1 (Metro + Express Bus)
+    if t1_otp:
+        t1_total_dur = t1_otp['dur']
+        t1_wait = t1_otp['wait']
+        t1_walk = t1_otp['walk']
+        t1_in_metro = t1_otp['in_vehicle'] * 0.5
+        t1_in_bus = t1_otp['in_vehicle'] * 0.5
+        t1_co2_grams = round(t1_otp['co2'])
+    elif not otp_online:
+        t1_in_metro  = max(3.0, straight_km * 1.5)
+        t1_in_bus    = max(4.0, straight_km * 1.8)
+        t1_wait      = metro_wait_def + bus_wait_def
+        t1_walk      = 7.0
+        t1_total_dur = t1_walk + t1_wait + t1_in_metro + t1_in_bus
+        t1_co2_grams = round((bus_dist_km * 0.45 * EF_METRO) + (bus_dist_km * 0.55 * EF_BUS))
+    else:
+        t1_in_metro = 9999
+        t1_in_bus = 9999
+        t1_wait = 9999
+        t1_walk = 9999
+        t1_total_dur = 9999
+        t1_co2_grams = 0
 
-    t2_in_bus    = max(8.0, straight_km * 3.1)
-    t2_wait      = 9.0 if is_peak else 14.0
-    t2_walk      = 9.0
-    t2_total_dur = t2_walk + t2_wait + t2_in_bus
-    t2_co2_grams = round(bus_dist_km * EF_BUS)
+    # Transit 2 (Direct Bus)
+    if t2_otp:
+        t2_total_dur = t2_otp['dur']
+        t2_wait = t2_otp['wait']
+        t2_walk = t2_otp['walk']
+        t2_in_bus = t2_otp['in_vehicle']
+        t2_co2_grams = round(t2_otp['co2'])
+    elif not otp_online:
+        t2_in_bus    = max(8.0, straight_km * 3.1)
+        t2_wait      = 9.0 if is_peak else 14.0
+        t2_walk      = 9.0
+        t2_total_dur = t2_walk + t2_wait + t2_in_bus
+        t2_co2_grams = round(bus_dist_km * EF_BUS)
+    else:
+        t2_in_bus = 9999
+        t2_wait = 9999
+        t2_walk = 9999
+        t2_total_dur = 9999
+        t2_co2_grams = 0
 
     car_co2_grams  = round(car_dist_km * EF_CAR)
     moto_co2_grams = round(car_dist_km * EF_MOTO)
@@ -152,8 +263,8 @@ def compute_student_route_and_co2(tk, is_peak=True, reverse=False):
     C_car  = (car_dur_min + parking_car) + ((car_dist_km ** 0.85) * 0.35 * 5) + ASC_CAR
     # Added (car_dist_km * 0.8) as a fatigue/discomfort penalty for riding a motorcycle over long distances
     C_moto = (moto_dur_min + parking_moto) + ((car_dist_km ** 0.85) * 0.18 * 5) + (car_dist_km * 0.8) + ASC_MOTO
-    C_t1   = (t1_in_metro + t1_in_bus + t1_walk) + (1.2 * t1_wait) + 4.0 + ASC_T1
-    C_t2   = (t2_in_bus + t2_walk) + (1.2 * t2_wait) + ASC_T2
+    C_t1   = (t1_in_metro + t1_in_bus + t1_walk) + (1.2 * t1_wait) + 4.0 + ASC_T1 if t1_total_dur < 9999 else 999999
+    C_t2   = (t2_in_bus + t2_walk) + (1.2 * t2_wait) + ASC_T2 if t2_total_dur < 9999 else 999999
     C_foot = foot_dur_min * 1.1 + ASC_FOOT
 
     # Walk bias logic

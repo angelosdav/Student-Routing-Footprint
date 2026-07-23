@@ -219,3 +219,6 @@ __marimo__/
 
 # OSRM Data
 osrm_data/
+
+# OTP Data (Bus/Metro Graph)
+data/otp-data/

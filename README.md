@@ -10,10 +10,10 @@ It consists of a web-based interactive map dashboard and a Python-based Monte Ca
 
 ## Features
 
-- **Interactive Web Dashboard** - Visualize optimal routes, transport mode probabilities, and CO2 emissions between any Attica postal code and major university campuses using Leaflet.js.
-- **Monte Carlo Simulation** - Run bulk simulations on student datasets to estimate the total environmental footprint of exam periods.
-- **Multinomial Logit Choice Model** - Mathematically predict mode selection based on travel time, wait time, access constraints, and alternative-specific constants.
-- **Local Routing Engine** - Uses local Dockerized OSRM instances (for driving and walking) for fast and private route calculations, with a built-in Haversine distance fallback if the engine is offline.
+- **Interactive Web Dashboard**: Visualize optimal routes, transport mode probabilities, and CO2 emissions between any Attica postal code and major university campuses using Leaflet.js.
+- **Monte Carlo Simulation**: Run bulk simulations on student datasets to estimate the total environmental footprint of exam periods.
+- **Multinomial Logit Choice Model**: Mathematically predict mode selection based on travel time, wait time, access constraints, and alternative-specific constants.
+- **Local Routing Engine**: Uses local Dockerized OSRM instances (for driving and walking) for fast and private route calculations, with a built-in Haversine distance fallback if the engine is offline.
 
 ## Architecture
 

@@ -1,56 +1,68 @@
-# Student Routing & Environmental Footprint Analysis
+# OSRM & Transit Mobility CO2 Engine
 
-> A data pipeline that analyzes student exam commutes to estimate the CO2 footprint of "unnecessary" university trips.
+> A student mobility simulation and web dashboard that calculates transportation mode choices and CO2 footprints for universities in Attica using OSRM and a Multinomial Logit Model.
 
 ## Overview
 
-This project analyzes the environmental impact of students commuting to university exams when the trip might be considered "unnecessary." An unnecessary trip is defined by a policy threshold, such as a student attending an exam but receiving a grade of 1.0 or lower. 
+This project provides a comprehensive system for modeling student mobility, predicting transportation mode choices, and calculating the environmental CO2 footprint for university commutes in Attica, Greece (including UNIWA, EKPA, EMP, etc.). 
 
-The system takes student grades and postal codes as input, geocodes the locations, and calculates the actual road distance to the university using OpenStreetMap and OSRM routing APIs. It then applies a Multinomial Logit (MNL) model to estimate the probability of the student using different transport modes (Car, Public Transport, Walking).
+It consists of a web-based interactive map dashboard and a Python-based Monte Carlo simulation. The system leverages the Open Source Routing Machine (OSRM) for accurate routing and a Multinomial Logit (MNL) model to determine the probability of a student choosing a specific mode of transport (car, motorcycle, public transit, or walking).
 
-To provide robust estimates, the system runs Monte Carlo simulations over the transport mode probabilities, outputting the expected CO2 equivalent emissions per course along with 95% confidence intervals.
+## Features
 
-## Pipeline
+- **Interactive Web Dashboard** β€” Visualize optimal routes, transport mode probabilities, and CO2 emissions between any Attica postal code and major university campuses using Leaflet.js.
+- **Monte Carlo Simulation** β€” Run bulk simulations on student datasets to estimate the total environmental footprint of exam periods.
+- **Multinomial Logit Choice Model** β€” Mathematically predict mode selection based on travel time, wait time, access constraints, and alternative-specific constants.
+- **Local Routing Engine** β€” Uses local Dockerized OSRM instances (for driving and walking) for fast and private route calculations, with a built-in Haversine distance fallback if the engine is offline.
 
-1. **Input Data**: Reads student records (postal codes, courses, grades) from a CSV file.
-2. **Geocoding**: Converts Greek postal codes to coordinates using the Nominatim (OpenStreetMap) or Photon APIs.
-3. **Routing**: Calculates actual road distance and driving duration using the free OSRM API (falling back to straight-line Haversine distance if needed).
-4. **Mode Estimation**: Uses an MNL model to estimate the probability of using a car, public transport, or walking based on distance and time.
-5. **Simulation**: Runs thousands of Monte Carlo simulations to calculate statistical CO2 footprint distributions for the unnecessary trips.
+## Architecture
+
+The system operates through two main interfaces sharing the same underlying logic:
+
+1. **Frontend (Web App)**: `frontend/index.html` queries the local OSRM APIs and public Nominatim API (for geocoding), calculates route costs, applies the MNL model, and renders the result on a Leaflet map.
+2. **Backend Simulation (Python)**: `src/simulate_failing_students_co2.py` reads student data (`data/students_exam_dataset.csv`), queries the OSRM APIs, applies the MNL model, and outputs a detailed CLI report of the aggregated CO2 emissions.
+
+Both interfaces rely on two Dockerized OSRM backend instances:
+- **Port 5000**: OSRM driving profile (for cars, motorcycles, buses).
+- **Port 5001**: OSRM walking profile (for pedestrians).
+
+## Mode Choice Model
+
+The system uses a Multinomial Logit Model to determine the probability $P(i)$ of choosing a transport mode $i$.
+
+### Generalized Cost ($C_i$)
+$$C = t_{\text{travel}} + 1.2 \cdot t_{\text{wait}} + \text{Penalty}_{\text{transfer}} + \text{ASC}$$
+
+### Probability of Selection
+$$P(i) = \frac{e^{-\theta \cdot C_i}}{\sum_k e^{-\theta \cdot C_k}}$$
+
+### Emission Factors (g CO₂eq / pax-km)
+- 🚗 **Car**: 120.0
+- 🛵 **Motorcycle**: 70.0
+- 🚌 **Bus**: 10.81
+- 🚇 **Metro**: 3.1
+- 🚶 **Walking**: 0.0
 
 ## Tech Stack
 
 | Layer | Technologies |
 |---|---|
-| Core Language | Python 3 |
-| HTTP Requests | `requests`, `urllib3` |
-| Geocoding APIs | Nominatim (OSM), Photon (Komoot) |
-| Routing API | OSRM (Project OSRM) |
+| Routing Engine | OSRM (Open Source Routing Machine), Docker |
+| Frontend | HTML, Vanilla CSS, JavaScript, Leaflet.js |
+| Simulation | Python 3, `requests` |
+| Data Storage | JSON, CSV |
 
-## Configuration
+## Data & Configuration
 
-The project's behavior is controlled by `config.json`. Important options include:
-
-| Option | Category | Description |
-|---|---|---|
-| `policy.max_unnecessary_grade` | Policy | The maximum grade threshold (e.g., 1.0) for a trip to be deemed "unnecessary". |
-| `policy.use_marginal_pt_emissions` | Policy | If `true`, assumes public transport runs regardless of the student, resulting in 0 marginal CO2 emissions. |
-| `mnl_model.*` | Model | Parameters for the Multinomial Logit model (ASCs and time sensitivity). |
-| `simulation.n_simulations` | Simulation | The number of Monte Carlo iterations to run for confidence intervals. |
-| `data.university_tk` | Data | The postal code of the university/exam location. |
-
-## Dataset
-
-The system expects a CSV file located at `data/students_data.csv` (as defined in `config.json`). 
-Required columns typically include:
-- `onoma_mathimatos`: The course name.
-- `tk`: The student's postal code.
-- `bathmos`: The student's final grade for the course.
+- **`data/postcodes_attica.json`**: Local geocoding fallback mapping 272 Attica postal codes to coordinates.
+- **`data/students_exam_dataset.csv`**: Sample dataset of 200 students, including `TK_KATOIKIA` (Origin Postal Code), `GRADE`, and `COURSE`.
+- **`config/config.json`**: Configuration for the MNL model, simulation parameters, and policy scenarios.
 
 ## Requirements
 
-- Python 3.10+
-- Dependencies listed in `requirements.txt`
+- Python 3.8+
+- Docker & Docker Desktop (for local OSRM routing)
+- Git
 
 ## Getting Started
 
@@ -58,50 +70,41 @@ Required columns typically include:
 
 ```bash
 git clone <repository-url>
-cd Student-Routing-Footprint
+cd <repository-directory>
 ```
 
-### 2. Create and activate a virtual environment
+### 2. Start the OSRM Docker Containers
 
-**Windows:**
+Start the vehicle routing engine (Port 5000):
 ```bash
-python -m venv .venv
-.venv\Scripts\activate
+docker run -d --name osrm_transit -p 5000:5000 -v "${PWD}/osrm_data/car:/data" osrm/osrm-backend osrm-routed --algorithm mld /data/attica.osrm
 ```
 
-**macOS / Linux:**
+Start the pedestrian routing engine (Port 5001):
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+docker run -d --name osrm_foot -p 5001:5000 -v "${PWD}/osrm_data/foot:/data" osrm/osrm-backend osrm-routed --algorithm mld /data/attica.osrm
 ```
 
-### 3. Install dependencies
+> **Note**: On Linux/macOS, replace `${PWD}` with `$(pwd)`.
+
+### 3. Install Python Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Configure the analysis
-
-Edit `config.json` to adjust the policy thresholds, MNL parameters, or university postal code. Ensure your student data is placed in `data/students_data.csv`.
-
-### 5. Run the project
-
-```bash
-python scripts/main.py
-```
-
 ## Usage
 
-When you run `main.py`, the system will:
-1. Load the configuration and student records.
-2. Identify unnecessary trips based on the policy threshold.
-3. Output a detailed list of students, their course, grade, distance, and estimated transport mode probabilities.
-4. Execute the Monte Carlo simulation.
-5. Print an environmental impact report showing the total estimated CO2 emissions and a breakdown by course with 95% confidence intervals.
+### Web Dashboard
+Open `frontend/index.html` in your web browser. Select an origin postal code and a destination campus to view the calculated routes, modal split, and CO2 emissions dynamically. 
 
-## Limitations and Important Considerations
+### Python Simulation
+Run the Monte Carlo simulation to process the student dataset:
 
-- **API Rate Limits**: The Nominatim API has a strict rate limit of ~1 request/second. The script includes artificial delays (`time.sleep(1)`) to comply with this policy and caches results to avoid redundant requests.
-- **Geocoding Accuracy**: Postal codes provide a regional center rather than a precise residential address, which introduces a margin of error in distance calculations.
-- **Routing Limitations**: The OSRM API uses a standard driving profile. If a route cannot be found, the system falls back to straight-line (Haversine) distance.
+```bash
+python src/simulate_failing_students_co2.py
+```
+
+This will output a detailed report of the simulated trips and the total environmental footprint to the console. 
+
+> **Fallback Mechanism**: If the OSRM Docker containers are not running, both the web app and the Python script will automatically fall back to using Haversine straight-line distance approximations to calculate the routes.

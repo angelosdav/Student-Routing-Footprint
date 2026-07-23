@@ -149,8 +149,9 @@ def compute_student_route_and_co2(tk, is_peak=True, reverse=False):
     parking_car  = 4.0 if not reverse else 0.0
     parking_moto = 1.0 if not reverse else 0.0
     
-    C_car  = (car_dur_min + parking_car) + (car_dist_km * 0.35 * 5) + ASC_CAR
-    C_moto = (moto_dur_min + parking_moto) + (car_dist_km * 0.18 * 5) + ASC_MOTO
+    C_car  = (car_dur_min + parking_car) + ((car_dist_km ** 0.85) * 0.35 * 5) + ASC_CAR
+    # Added (car_dist_km * 0.8) as a fatigue/discomfort penalty for riding a motorcycle over long distances
+    C_moto = (moto_dur_min + parking_moto) + ((car_dist_km ** 0.85) * 0.18 * 5) + (car_dist_km * 0.8) + ASC_MOTO
     C_t1   = (t1_in_metro + t1_in_bus + t1_walk) + (1.2 * t1_wait) + 4.0 + ASC_T1
     C_t2   = (t2_in_bus + t2_walk) + (1.2 * t2_wait) + ASC_T2
     C_foot = foot_dur_min * 1.1 + ASC_FOOT

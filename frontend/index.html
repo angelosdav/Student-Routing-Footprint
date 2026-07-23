@@ -697,35 +697,33 @@
             let t1_otp = null;
             let t2_otp = null;
 
-            if (otpOnline) {
-                for (const itin of otpItineraries) {
-                    const legs = itin.legs || [];
-                    const hasMetro = legs.some(leg => ['SUBWAY', 'TRAM', 'RAIL'].includes(leg.mode));
-                    const hasBus = legs.some(leg => leg.mode === 'BUS');
+            for (const itin of otpItineraries) {
+                const legs = itin.legs || [];
+                const hasMetro = legs.some(leg => ['SUBWAY', 'TRAM', 'RAIL'].includes(leg.mode));
+                const hasBus = legs.some(leg => leg.mode === 'BUS');
 
-                    // Calculate CO2
-                    const EF_BUS = 10.81;
-                    const EF_METRO = 3.1;
-                    let co2_g = 0;
-                    legs.forEach(leg => {
-                        const distKm = leg.distance / 1000;
-                        if (leg.mode === 'BUS') co2_g += distKm * EF_BUS;
-                        else if (['SUBWAY', 'TRAM', 'RAIL'].includes(leg.mode)) co2_g += distKm * EF_METRO;
-                    });
+                // Calculate CO2
+                const EF_BUS = 10.81;
+                const EF_METRO = 3.1;
+                let co2_g = 0;
+                legs.forEach(leg => {
+                    const distKm = leg.distance / 1000;
+                    if (leg.mode === 'BUS') co2_g += distKm * EF_BUS;
+                    else if (['SUBWAY', 'TRAM', 'RAIL'].includes(leg.mode)) co2_g += distKm * EF_METRO;
+                });
 
-                    const durMin = Math.round(itin.duration / 60);
-                    const waitMin = Math.round(itin.waitingTime / 60);
-                    const walkMin = Math.round(itin.walkTime / 60);
-                    const inVehicleMin = Math.max(0, durMin - waitMin - walkMin);
+                const durMin = Math.round(itin.duration / 60);
+                const waitMin = Math.round(itin.waitingTime / 60);
+                const walkMin = Math.round(itin.walkTime / 60);
+                const inVehicleMin = Math.max(0, durMin - waitMin - walkMin);
 
-                    if (hasMetro) {
-                        if (!t1_otp || durMin < t1_otp.dur) {
-                            t1_otp = { dur: durMin, wait: waitMin, walk: walkMin, inVehicle: inVehicleMin, co2: Math.round(co2_g), legs };
-                        }
-                    } else if (hasBus) {
-                        if (!t2_otp || durMin < t2_otp.dur) {
-                            t2_otp = { dur: durMin, wait: waitMin, walk: walkMin, inVehicle: inVehicleMin, co2: Math.round(co2_g), legs };
-                        }
+                if (hasMetro) {
+                    if (!t1_otp || durMin < t1_otp.dur) {
+                        t1_otp = { dur: durMin, wait: waitMin, walk: walkMin, inVehicle: inVehicleMin, co2: Math.round(co2_g), legs };
+                    }
+                } else if (hasBus) {
+                    if (!t2_otp || durMin < t2_otp.dur) {
+                        t2_otp = { dur: durMin, wait: waitMin, walk: walkMin, inVehicle: inVehicleMin, co2: Math.round(co2_g), legs };
                     }
                 }
             }
@@ -876,6 +874,7 @@
 
             let pCar = 0, pMoto = 0, pT1 = 0, pT2 = 0, pFoot = 0;
             
+            // Expected probabilities based on population segments
             let w_car = (carSelect === 'yes') ? 1.0 : (carSelect === 'no' ? 0.0 : 0.20);
             let w_moto = (motoSelect === 'yes') ? 1.0 : (motoSelect === 'no' ? 0.0 : 0.15);
             
@@ -888,19 +887,20 @@
             
             for (let seg of segments) {
                 if (seg.w <= 0) continue;
-                const pr = getProbs(seg.c, seg.m);
-                pCar  += seg.w * pr.pC;
-                pMoto += seg.w * pr.pM;
-                pT1   += seg.w * pr.pT1;
-                pT2   += seg.w * pr.pT2;
-                pFoot += seg.w * pr.pF;
+                let probs = getProbs(seg.c, seg.m);
+                pCar += probs.pC * seg.w;
+                pMoto += probs.pM * seg.w;
+                pT1 += probs.pT1 * seg.w;
+                pT2 += probs.pT2 * seg.w;
+                pFoot += probs.pF * seg.w;
             }
 
-            const pctCar = (pCar * 100).toFixed(0);
-            const pctMoto = (pMoto * 100).toFixed(0);
-            const pctT1 = (pT1 * 100).toFixed(0);
-            const pctT2 = (pT2 * 100).toFixed(0);
-            const pctFoot = (pFoot * 100).toFixed(0);
+            const totalP = pCar + pMoto + pT1 + pT2 + pFoot;
+            const pctCar  = Math.round((pCar / totalP) * 100);
+            const pctMoto = Math.round((pMoto / totalP) * 100);
+            const pctT1   = Math.round((pT1 / totalP) * 100);
+            const pctT2   = Math.round((pT2 / totalP) * 100);
+            const pctFoot = 100 - (pctCar + pctMoto + pctT1 + pctT2);
 
             const cardsData = [
                 {
@@ -925,29 +925,17 @@
                         <span class="co2-lbl">Carbon Footprint (per pax):</span>
                         <span class="co2-val">${t1_co2Grams} g CO₂</span>
                     </div>
+                    ` : ''}
                     <div class="steps-flow">
                         ${t1_stepsHTML}
                     </div>
-                    ` : `
-                    <div class="steps-flow">
-                        <div class="step-row">
-                            <span class="step-tag" style="background:#e11d48">N/A</span>
-                            <span class="step-title-text" style="color: var(--text-muted)">No route found / Service unavailable</span>
-                        </div>
-                    </div>
-                    `}
                 </div>`
                 },
                 {
                     mode: 'transit2',
-                    name: 'Direct Bus Transit',
-                    pct: pctT2,
-                    dur: t2_totalDur,
-                    co2: t2_co2Grams,
-                    html: `
                 <div class="card" id="card-transit2" onclick="showOnMap('transit2')">
                     <div class="card-header">
-                        <span class="mode-title">Direct Bus Line</span>
+                        <span class="mode-title">Bus-Only Transit</span>
                         <span class="card-badge">Logit: ${pctT2}% P(i)</span>
                     </div>
                     ${t2_totalDur !== 9999 ? `
@@ -960,17 +948,10 @@
                         <span class="co2-lbl">Carbon Footprint (per pax):</span>
                         <span class="co2-val">${t2_co2Grams} g CO₂</span>
                     </div>
+                    ` : ''}
                     <div class="steps-flow">
                         ${t2_stepsHTML}
                     </div>
-                    ` : `
-                    <div class="steps-flow">
-                        <div class="step-row">
-                            <span class="step-tag" style="background:#e11d48">N/A</span>
-                            <span class="step-title-text" style="color: var(--text-muted)">No route found / Service unavailable</span>
-                        </div>
-                    </div>
-                    `}
                 </div>`
                 },
                 {

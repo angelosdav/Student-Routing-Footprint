@@ -4,6 +4,7 @@ import math
 import random
 import os
 import requests
+import concurrent.futures
 
 # Base configuration
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -373,46 +374,54 @@ def run_simulation(min_grade=0.0, max_grade=1.0, dataset_path=DATASET_PATH):
     mode_co2    = {'transit1': 0, 'transit2': 0, 'car': 0, 'moto': 0, 'foot': 0}
     valid_simulated = 0
 
-    for i, s in enumerate(filtered_students, 1):
-        # Go leg
+    def process_student(args):
+        i, s = args
         go_res = compute_student_route_and_co2(s['tk'], is_peak=True, reverse=False)
-        
         if not go_res:
-            continue
-
-        # Return leg (passing go_mode_id to enforce logic constraints)
+            return None
+            
         ret_res = compute_student_route_and_co2(s['tk'], is_peak=False, reverse=True, go_mode_id=go_res['chosen_mode_id'])
-        
         if not ret_res:
-            continue
+            return None
+            
+        return (i, s, go_res, ret_res)
 
-        valid_simulated += 1
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        results = executor.map(process_student, enumerate(filtered_students, 1))
         
-        # Go leg stats
-        go_id = go_res['chosen_mode_id']
-        go_name = go_res['chosen_mode_name']
-        go_co2 = go_res['chosen_co2_grams']
-        go_dur = go_res['chosen_dur_min']
+        for res in results:
+            if not res:
+                continue
+                
+            i, s, go_res, ret_res = res
 
-        # Return leg stats
-        ret_id = ret_res['chosen_mode_id']
-        ret_name = ret_res['chosen_mode_name']
-        ret_co2 = ret_res['chosen_co2_grams']
-        ret_dur = ret_res['chosen_dur_min']
+            valid_simulated += 1
+            
+            # Go leg stats
+            go_id = go_res['chosen_mode_id']
+            go_name = go_res['chosen_mode_name']
+            go_co2 = go_res['chosen_co2_grams']
+            go_dur = go_res['chosen_dur_min']
 
-        # Round trip stats
-        student_co2 = go_co2 + ret_co2
-        total_co2_grams += student_co2
+            # Return leg stats
+            ret_id = ret_res['chosen_mode_id']
+            ret_name = ret_res['chosen_mode_name']
+            ret_co2 = ret_res['chosen_co2_grams']
+            ret_dur = ret_res['chosen_dur_min']
 
-        mode_counts[go_id] += 1
-        mode_counts[ret_id] += 1
-        mode_co2[go_id] += go_co2
-        mode_co2[ret_id] += ret_co2
+            # Round trip stats
+            student_co2 = go_co2 + ret_co2
+            total_co2_grams += student_co2
 
-        print(f"Student {i:02d} (Postcode {s['tk']} | Grade {s['grade']}):\n"
-              f"   Outbound (Peak): {go_name:<26} | CO2: {go_co2:>3} g | Time: {go_dur:>4} min\n"
-              f"   Inbound (Off Peak): {ret_name:<26} | CO2: {ret_co2:>3} g | Time: {ret_dur:>4} min\n"
-              f"   Round Trip Footprint: {student_co2} g CO2eq\n")
+            mode_counts[go_id] += 1
+            mode_counts[ret_id] += 1
+            mode_co2[go_id] += go_co2
+            mode_co2[ret_id] += ret_co2
+
+            print(f"Student {i:02d} (Postcode {s['tk']} | Grade {s['grade']}):\n"
+                  f"   Outbound (Peak): {go_name:<26} | CO2: {go_co2:>3} g | Time: {go_dur:>4} min\n"
+                  f"   Inbound (Off Peak): {ret_name:<26} | CO2: {ret_co2:>3} g | Time: {ret_dur:>4} min\n"
+                  f"   Round Trip Footprint: {student_co2} g CO2eq\n")
 
     print(f"\n============================================================")
     print(f"CO2 Environmental Footprint Summary (Grades {min_grade} to {max_grade}) in Round Trip")

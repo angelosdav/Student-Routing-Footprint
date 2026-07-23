@@ -22,9 +22,10 @@ The system operates through two main interfaces sharing the same underlying logi
 1. **Frontend (Web App)**: `frontend/index.html` queries the local OSRM APIs and public Nominatim API (for geocoding), calculates route costs, applies the MNL model, and renders the result on a Leaflet map.
 2. **Backend Simulation (Python)**: `src/simulate_failing_students_co2.py` reads student data (`data/students_exam_dataset.csv`), queries the OSRM APIs, applies the MNL model, and outputs a detailed CLI report of the aggregated CO2 emissions.
 
-Both interfaces rely on two Dockerized OSRM backend instances:
-- **Port 5000**: OSRM driving profile (for cars, motorcycles, buses).
-- **Port 5001**: OSRM walking profile (for pedestrians).
+Both interfaces rely on three Dockerized backend instances:
+- **Port 5000 (OSRM)**: Driving profile (for cars, motorcycles, buses).
+- **Port 5001 (OSRM)**: Walking profile (for pedestrians).
+- **Port 8080 (OTP)**: OpenTripPlanner (for real transit schedules and geometry).
 
 ## Mode Choice Model
 
@@ -47,9 +48,10 @@ $$P(i) = \frac{e^{-\theta \cdot C_i}}{\sum_k e^{-\theta \cdot C_k}}$$
 
 | Layer | Technologies |
 |---|---|
-| Routing Engine | OSRM (Open Source Routing Machine), Docker |
+| Routing Engine | OSRM, OpenTripPlanner (OTP), Docker |
 | Frontend | HTML, Vanilla CSS, JavaScript, Leaflet.js |
 | Simulation | Python 3, `requests` |
+| APIs | GraphQL (OTP), REST (OSRM) |
 | Data Storage | JSON, CSV |
 
 ## Data & Configuration
@@ -85,9 +87,16 @@ Start the pedestrian routing engine (Port 5001):
 docker run -d --name osrm_foot -p 5001:5000 -v "${PWD}/osrm_data/foot:/data" osrm/osrm-backend osrm-routed --algorithm mld /data/attica.osrm
 ```
 
+### 3. Start the OpenTripPlanner Container
+
+The OTP container requires the `otp-data` folder, which contains the GTFS feeds for OSY (buses) and STASY (metro/tram), along with the OpenStreetMap data. When it boots up, it will build a graph in memory.
+```bash
+docker run -d -p 8080:8080 --name otp -v "${PWD}/otp-data:/var/otp" docker.io/opentripplanner/opentripplanner:latest --load --serve /var/otp
+```
+
 > **Note**: On Linux/macOS, replace `${PWD}` with `$(pwd)`.
 
-### 3. Install Python Dependencies
+### 4. Install Python Dependencies
 
 ```bash
 pip install -r requirements.txt

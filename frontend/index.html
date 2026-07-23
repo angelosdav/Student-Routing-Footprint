@@ -495,6 +495,34 @@
             return { lat: 37.9857, lon: 23.6792, tk: cleanTk };
         }
 
+        // Decode Google Polyline format for OpenTripPlanner geometries
+        function decodePolyline(encoded) {
+            let points = [];
+            let index = 0, len = encoded.length;
+            let lat = 0, lng = 0;
+            while (index < len) {
+                let b, shift = 0, result = 0;
+                do {
+                    b = encoded.charCodeAt(index++) - 63;
+                    result |= (b & 0x1f) << shift;
+                    shift += 5;
+                } while (b >= 0x20);
+                let dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
+                lat += dlat;
+                shift = 0;
+                result = 0;
+                do {
+                    b = encoded.charCodeAt(index++) - 63;
+                    result |= (b & 0x1f) << shift;
+                    shift += 5;
+                } while (b >= 0x20);
+                let dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
+                lng += dlng;
+                points.push([lat / 1e5, lng / 1e5]);
+            }
+            return points;
+        }
+
         async function fetchOSRM(port, profile, start, end) {
             try {
                 const url = `http://localhost:${port}/route/v1/${profile}/${start.lon},${start.lat};${end.lon},${end.lat}?overview=full&geometries=geojson`;
@@ -531,6 +559,90 @@
                     ]
                 }
             };
+        }
+
+        // Query OpenTripPlanner GraphQL API
+        async function fetchOTP(start, end, date, time) {
+            const url = 'http://localhost:8080/otp/routers/default/index/graphql';
+            const query = `
+            {
+              plan(
+                from: { lat: ${start.lat}, lon: ${start.lon} },
+                to: { lat: ${end.lat}, lon: ${end.lon} },
+                date: "${date}",
+                time: "${time}"
+              ) {
+                itineraries {
+                  duration
+                  waitingTime
+                  walkTime
+                  legs {
+                    mode
+                    duration
+                    distance
+                    transitLeg
+                    from { name lat lon }
+                    to { name lat lon }
+                    legGeometry { points }
+                    route { shortName longName }
+                  }
+                }
+              }
+            }
+            `;
+            try {
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query })
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.data && data.data.plan) {
+                        return data.data.plan.itineraries || [];
+                    }
+                }
+            } catch (e) {
+                console.warn("OpenTripPlanner Offline. Using empirical fallback.");
+                return null;
+            }
+            return [];
+        }
+
+        // Helper to generate dynamic HTML steps for OTP itineraries
+        function generateTransitStepsHTML(legs, tk1, tk2) {
+            if (!legs || legs.length === 0) return '';
+            return legs.map((leg, index) => {
+                let tag = 'Walk';
+                let title = 'Walk';
+                let subtext = '';
+                
+                if (leg.mode === 'WALK') {
+                    tag = 'Walk';
+                    title = index === 0 ? 'Walk to station/stop' : (index === legs.length - 1 ? 'Walk to Campus' : 'Walk transfer');
+                    subtext = `From ${leg.from.name || 'Origin'} to ${leg.to.name || 'Destination'}`;
+                } else if (leg.mode === 'BUS') {
+                    tag = 'Bus';
+                    title = `Board Bus ${leg.route?.shortName || ''}`;
+                    subtext = `${leg.route?.longName || ''}<br/>From <b>${leg.from.name}</b> to <b>${leg.to.name}</b>`;
+                } else if (leg.mode === 'SUBWAY' || leg.mode === 'TRAM' || leg.mode === 'RAIL') {
+                    tag = leg.mode === 'SUBWAY' ? 'Metro' : (leg.mode === 'TRAM' ? 'Tram' : 'Train');
+                    title = `Board ${tag} ${leg.route?.shortName || ''}`;
+                    subtext = `${leg.route?.longName || ''}<br/>From <b>${leg.from.name}</b> to <b>${leg.to.name}</b>`;
+                }
+                
+                const durMin = Math.round(leg.duration / 60);
+                
+                return `
+                <div class="step-row">
+                    <div>
+                        <span class="step-tag">${tag}</span>
+                        <span class="step-title-text">${title}</span>
+                        <div class="step-subtext" style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">${subtext}</div>
+                    </div>
+                    <span class="step-meta">${durMin} min</span>
+                </div>`;
+            }).join('');
         }
 
         async function drawLegOnMap(reqId, port, profile, p1, p2, color, dashArray = null, weight = 6) {
@@ -576,6 +688,48 @@
 
             loadingState.style.display = 'none';
 
+            // Query OpenTripPlanner
+            const dateStr = "2026-07-22"; // Wednesday target
+            const timeStr = isPeak ? "08:00" : "14:00";
+            const otpItineraries = await fetchOTP(start, end, dateStr, timeStr);
+            const otpOnline = (otpItineraries !== null);
+
+            let t1_otp = null;
+            let t2_otp = null;
+
+            if (otpOnline) {
+                for (const itin of otpItineraries) {
+                    const legs = itin.legs || [];
+                    const hasMetro = legs.some(leg => ['SUBWAY', 'TRAM', 'RAIL'].includes(leg.mode));
+                    const hasBus = legs.some(leg => leg.mode === 'BUS');
+
+                    // Calculate CO2
+                    const EF_BUS = 10.81;
+                    const EF_METRO = 3.1;
+                    let co2_g = 0;
+                    legs.forEach(leg => {
+                        const distKm = leg.distance / 1000;
+                        if (leg.mode === 'BUS') co2_g += distKm * EF_BUS;
+                        else if (['SUBWAY', 'TRAM', 'RAIL'].includes(leg.mode)) co2_g += distKm * EF_METRO;
+                    });
+
+                    const durMin = Math.round(itin.duration / 60);
+                    const waitMin = Math.round(itin.waitingTime / 60);
+                    const walkMin = Math.round(itin.walkTime / 60);
+                    const inVehicleMin = Math.max(0, durMin - waitMin - walkMin);
+
+                    if (hasMetro) {
+                        if (!t1_otp || durMin < t1_otp.dur) {
+                            t1_otp = { dur: durMin, wait: waitMin, walk: walkMin, inVehicle: inVehicleMin, co2: Math.round(co2_g), legs };
+                        }
+                    } else if (hasBus) {
+                        if (!t2_otp || durMin < t2_otp.dur) {
+                            t2_otp = { dur: durMin, wait: waitMin, walk: walkMin, inVehicle: inVehicleMin, co2: Math.round(co2_g), legs };
+                        }
+                    }
+                }
+            }
+
             const startStationInfo = KNOWN_STATION_NAMES(tk1);
             const endStationInfo = KNOWN_STATION_NAMES(tk2);
 
@@ -583,7 +737,12 @@
             const metroStation1 = { lat: start.lat + 0.004, lon: start.lon + 0.004, name: startStationInfo.metroStation };
             const busStop2 = { lat: end.lat - 0.002, lon: end.lon - 0.002, name: endStationInfo.busStop };
 
-            currentRoutesData = { start, end, carRoute, footRoute, tk1, tk2, busStop1, metroStation1, busStop2 };
+            currentRoutesData = { 
+                start, end, carRoute, footRoute, tk1, tk2, 
+                busStop1, metroStation1, busStop2,
+                t1_legs: t1_otp ? t1_otp.legs : null,
+                t2_legs: t2_otp ? t2_otp.legs : null
+            };
 
             const carMultiplier = isPeak ? 1.45 : 1.0;
             const metroWait1 = isPeak ? 4 : 6;
@@ -608,27 +767,71 @@
             const straightKm = Math.sqrt(Math.pow((start.lat - end.lat)*111, 2) + Math.pow((start.lon - end.lon)*88, 2));
             const busDistKm = (straightKm * 1.15);
 
-            const t1_walk1 = 4;
-            const t1_wait1 = metroWait1;
-            const t1_inMetro = Math.max(3, Math.round(straightKm * 1.5));
-            const t1_wait2 = busWait1;
-            const t1_inBus = Math.max(4, Math.round(straightKm * 1.8 * (isPeak ? 1.0 : 0.8)));
-            const t1_walk2 = 3;
+            // Transit 1 (Metro + Bus) Duration & Metrics
+            let t1_totalDur, t1_inVehicleTotal, t1_waitTotal, t1_co2Grams, t1_stepsHTML;
+            if (t1_otp) {
+                t1_totalDur = t1_otp.dur;
+                t1_inVehicleTotal = t1_otp.inVehicle;
+                t1_waitTotal = t1_otp.wait;
+                t1_co2Grams = t1_otp.co2;
+                t1_stepsHTML = generateTransitStepsHTML(t1_otp.legs, tk1, tk2);
+            } else if (!otpOnline) {
+                const t1_walk1 = 4;
+                const t1_wait1 = metroWait1;
+                const t1_inMetro = Math.max(3, Math.round(straightKm * 1.5));
+                const t1_wait2 = busWait1;
+                const t1_inBus = Math.max(4, Math.round(straightKm * 1.8 * (isPeak ? 1.0 : 0.8)));
+                const t1_walk2 = 3;
+                t1_inVehicleTotal = t1_inMetro + t1_inBus;
+                t1_waitTotal = t1_wait1 + t1_wait2;
+                t1_totalDur = t1_walk1 + t1_waitTotal + t1_inVehicleTotal + t1_walk2;
+                t1_co2Grams = Math.round((busDistKm * 0.45 * EF_METRO) + (busDistKm * 0.55 * EF_BUS));
+                t1_stepsHTML = `
+                    <div class="step-row"><div><span class="step-tag">Walk</span><span class="step-title-text">Walk to Bus Stop</span><div class="step-subtext">Origin (TK ${tk1})</div></div><span class="step-meta">${t1_walk1} min</span></div>
+                    <div class="step-row"><div><span class="step-tag">Wait</span><span class="step-title-text">Wait at OSY Stop</span><div class="step-subtext">${busStop1.name}</div></div><span class="step-meta">${t1_wait1} min</span></div>
+                    <div class="step-row"><div><span class="step-tag">Metro</span><span class="step-title-text">Metro Line (Est.)</span><div class="step-subtext">${metroStation1.name}</div></div><span class="step-meta">${t1_inMetro} min</span></div>
+                    <div class="step-row"><div><span class="step-tag">Transfer</span><span class="step-title-text">Transfer to connecting Bus</span><div class="step-subtext">Bus Transfer Node</div></div><span class="step-meta">${t1_wait2} min</span></div>
+                    <div class="step-row"><div><span class="step-tag">Bus</span><span class="step-title-text">Bus (Est.)</span><div class="step-subtext">To ${busStop2.name}</div></div><span class="step-meta">${t1_inBus} min</span></div>
+                    <div class="step-row"><div><span class="step-tag">Walk</span><span class="step-title-text">Walk to Campus</span><div class="step-subtext">Destination (TK ${tk2})</div></div><span class="step-meta">${t1_walk2} min</span></div>
+                `;
+            } else {
+                t1_totalDur = 9999;
+                t1_inVehicleTotal = 9999;
+                t1_waitTotal = 9999;
+                t1_co2Grams = 0;
+                t1_stepsHTML = `<div class="step-row"><span class="step-tag" style="background:#e11d48">N/A</span><span class="step-title-text">No route found</span></div>`;
+            }
 
-            const t1_inVehicleTotal = t1_inMetro + t1_inBus;
-            const t1_waitTotal = t1_wait1 + t1_wait2;
-            const t1_totalDur = t1_walk1 + t1_waitTotal + t1_inVehicleTotal + t1_walk2;
-            const t1_co2Grams = Math.round((busDistKm * 0.45 * EF_METRO) + (busDistKm * 0.55 * EF_BUS));
-
-            const t2_walk1 = 5;
-            const t2_wait1 = isPeak ? 9 : 14;
-            const t2_inBus = Math.max(8, Math.round(straightKm * 3.1 * (isPeak ? 1.0 : 0.8)));
-            const t2_walk2 = 4;
-
-            const t2_inVehicleTotal = t2_inBus;
-            const t2_waitTotal = t2_wait1;
-            const t2_totalDur = t2_walk1 + t2_waitTotal + t2_inVehicleTotal + t2_walk2;
-            const t2_co2Grams = Math.round(busDistKm * EF_BUS);
+            // Transit 2 (Direct Bus) Duration & Metrics
+            let t2_totalDur, t2_inVehicleTotal, t2_waitTotal, t2_co2Grams, t2_stepsHTML;
+            if (t2_otp) {
+                t2_totalDur = t2_otp.dur;
+                t2_inVehicleTotal = t2_otp.inVehicle;
+                t2_waitTotal = t2_otp.wait;
+                t2_co2Grams = t2_otp.co2;
+                t2_stepsHTML = generateTransitStepsHTML(t2_otp.legs, tk1, tk2);
+            } else if (!otpOnline) {
+                const t2_walk1 = 5;
+                const t2_wait1 = isPeak ? 9 : 14;
+                const t2_inBus = Math.max(8, Math.round(straightKm * 3.1 * (isPeak ? 1.0 : 0.8)));
+                const t2_walk2 = 4;
+                t2_inVehicleTotal = t2_inBus;
+                t2_waitTotal = t2_wait1;
+                t2_totalDur = t2_walk1 + t2_waitTotal + t2_inVehicleTotal + t2_walk2;
+                t2_co2Grams = Math.round(busDistKm * EF_BUS);
+                t2_stepsHTML = `
+                    <div class="step-row"><div><span class="step-tag">Walk</span><span class="step-title-text">Walk to Bus Stop</span><div class="step-subtext">Origin (TK ${tk1})</div></div><span class="step-meta">${t2_walk1} min</span></div>
+                    <div class="step-row"><div><span class="step-tag">Wait</span><span class="step-title-text">Wait at OSY Stop</span><div class="step-subtext">${busStop1.name}</div></div><span class="step-meta">${t2_wait1} min</span></div>
+                    <div class="step-row"><div><span class="step-tag">Bus</span><span class="step-title-text">Bus Line (Est.)</span><div class="step-subtext">To ${busStop2.name}</div></div><span class="step-meta">${t2_inBus} min</span></div>
+                    <div class="step-row"><div><span class="step-tag">Walk</span><span class="step-title-text">Walk to Campus</span><div class="step-subtext">Destination (TK ${tk2})</div></div><span class="step-meta">${t2_walk2} min</span></div>
+                `;
+            } else {
+                t2_totalDur = 9999;
+                t2_inVehicleTotal = 9999;
+                t2_waitTotal = 9999;
+                t2_co2Grams = 0;
+                t2_stepsHTML = `<div class="step-row"><span class="step-tag" style="background:#e11d48">N/A</span><span class="step-title-text">No route found</span></div>`;
+            }
 
             const carSelect = document.getElementById('hasCar').value;
             const motoSelect = document.getElementById('hasMoto').value;
@@ -723,54 +926,7 @@
                         <span class="co2-val">${t1_co2Grams} g CO₂</span>
                     </div>
                     <div class="steps-flow">
-                        <div class="step-row">
-                            <div>
-                                <span class="step-tag">Walk</span>
-                                <span class="step-title-text">Walk to Bus Stop</span>
-                                <div class="step-subtext">Origin (TK ${tk1})</div>
-                            </div>
-                            <span class="step-meta">${t1_walk1} min</span>
-                        </div>
-                        <div class="step-row">
-                            <div>
-                                <span class="step-tag">Wait</span>
-                                <span class="step-title-text">Wait at OSY Stop</span>
-                                <div class="step-subtext">${busStop1.name}</div>
-                            </div>
-                            <span class="step-meta">${t1_wait1} min</span>
-                        </div>
-                        <div class="step-row">
-                            <div>
-                                <span class="step-tag">Metro</span>
-                                <span class="step-title-text">Metro Line 3 (EF: 3.1 g/pax-km)</span>
-                                <div class="step-subtext">${metroStation1.name}</div>
-                            </div>
-                            <span class="step-meta">${t1_inMetro} min</span>
-                        </div>
-                        <div class="step-row">
-                            <div>
-                                <span class="step-tag">Transfer</span>
-                                <span class="step-title-text">Transfer to Bus 831</span>
-                                <div class="step-subtext">Bus Transfer Node</div>
-                            </div>
-                            <span class="step-meta">${t1_wait2} min</span>
-                        </div>
-                        <div class="step-row">
-                            <div>
-                                <span class="step-tag">Bus</span>
-                                <span class="step-title-text">Bus 831 (EF: 10.81 g/pax-km)</span>
-                                <div class="step-subtext">To ${busStop2.name}</div>
-                            </div>
-                            <span class="step-meta">${t1_inBus} min</span>
-                        </div>
-                        <div class="step-row">
-                            <div>
-                                <span class="step-tag">Walk</span>
-                                <span class="step-title-text">Walk to Campus</span>
-                                <div class="step-subtext">Destination (TK ${tk2})</div>
-                            </div>
-                            <span class="step-meta">${t1_walk2} min</span>
-                        </div>
+                        ${t1_stepsHTML}
                     </div>
                     ` : `
                     <div class="steps-flow">
@@ -805,38 +961,7 @@
                         <span class="co2-val">${t2_co2Grams} g CO₂</span>
                     </div>
                     <div class="steps-flow">
-                        <div class="step-row">
-                            <div>
-                                <span class="step-tag">Walk</span>
-                                <span class="step-title-text">Walk to Bus Stop</span>
-                                <div class="step-subtext">Origin (TK ${tk1})</div>
-                            </div>
-                            <span class="step-meta">${t2_walk1} min</span>
-                        </div>
-                        <div class="step-row">
-                            <div>
-                                <span class="step-tag">Wait</span>
-                                <span class="step-title-text">Wait at OSY Stop</span>
-                                <div class="step-subtext">${busStop1.name}</div>
-                            </div>
-                            <span class="step-meta">${t2_wait1} min</span>
-                        </div>
-                        <div class="step-row">
-                            <div>
-                                <span class="step-tag">Bus</span>
-                                <span class="step-title-text">Direct Bus A15 (EF: 10.81 g/pax-km)</span>
-                                <div class="step-subtext">To ${busStop2.name}</div>
-                            </div>
-                            <span class="step-meta">${t2_inBus} min</span>
-                        </div>
-                        <div class="step-row">
-                            <div>
-                                <span class="step-tag">Walk</span>
-                                <span class="step-title-text">Walk to Campus</span>
-                                <div class="step-subtext">Destination (TK ${tk2})</div>
-                            </div>
-                            <span class="step-meta">${t2_walk2} min</span>
-                        </div>
+                        ${t2_stepsHTML}
                     </div>
                     ` : `
                     <div class="steps-flow">
@@ -995,28 +1120,84 @@
                 addMarker(end.lat, end.lon, `<b>Destination:</b> TK ${tk2}`);
             }
             else if (mode === 'transit1') {
-                await drawLegOnMap(reqId, 5001, 'walking', start, busStop1, '#059669', '6, 6', 4);
-                await drawLegOnMap(reqId, 5000, 'driving', busStop1, metroStation1, '#9333ea', null, 6);
-                await drawLegOnMap(reqId, 5000, 'driving', metroStation1, busStop2, '#d97706', null, 6);
-                await drawLegOnMap(reqId, 5001, 'walking', busStop2, end, '#059669', '6, 6', 4);
+                if (currentRoutesData.t1_legs) {
+                    for (const leg of currentRoutesData.t1_legs) {
+                        const coords = decodePolyline(leg.legGeometry.points);
+                        let color = '#3b82f6'; // default
+                        let dashArray = null;
+                        let weight = 6;
+                        if (leg.mode === 'WALK') {
+                            color = '#059669';
+                            dashArray = '6, 6';
+                            weight = 4;
+                        } else if (leg.mode === 'BUS') {
+                            color = '#f59e0b';
+                        } else if (leg.mode === 'SUBWAY') {
+                            color = '#ef4444';
+                        } else if (leg.mode === 'TRAM') {
+                            color = '#10b981';
+                        }
+                        const underlay = L.polyline(coords, { color: '#090d16', weight: weight + 3, opacity: 0.75 }).addTo(map);
+                        const poly = L.polyline(coords, { color, weight, opacity: 1.0, dashArray }).addTo(map);
+                        mapLayers.push(underlay, poly);
+                        
+                        if (leg.transitLeg) {
+                            addMarker(leg.from.lat, leg.from.lon, `<b>${leg.mode}: ${leg.from.name}</b><br/>Board ${leg.route?.shortName || ''}`);
+                            addMarker(leg.to.lat, leg.to.lon, `<b>Arrival: ${leg.to.name}</b>`);
+                        }
+                    }
+                    addMarker(start.lat, start.lon, `<b>Origin:</b> TK ${tk1}`);
+                    addMarker(end.lat, end.lon, `<b>Destination:</b> TK ${tk2}`);
+                } else {
+                    await drawLegOnMap(reqId, 5001, 'walking', start, busStop1, '#059669', '6, 6', 4);
+                    await drawLegOnMap(reqId, 5000, 'driving', busStop1, metroStation1, '#9333ea', null, 6);
+                    await drawLegOnMap(reqId, 5000, 'driving', metroStation1, busStop2, '#d97706', null, 6);
+                    await drawLegOnMap(reqId, 5001, 'walking', busStop2, end, '#059669', '6, 6', 4);
 
-                if (reqId !== currentMapRequestId) return;
-                addMarker(start.lat, start.lon, `<b>Origin:</b> TK ${tk1}`);
-                addMarker(busStop1.lat, busStop1.lon, `<b>OSY Stop: ${busStop1.name}</b><br/>Board Metro Line 3`);
-                addMarker(metroStation1.lat, metroStation1.lon, `<b>Metro: ${metroStation1.name}</b><br/>Transfer to Bus 831`);
-                addMarker(busStop2.lat, busStop2.lon, `<b>OSY Stop: ${busStop2.name}</b><br/>Walk to campus`);
-                addMarker(end.lat, end.lon, `<b>Destination:</b> TK ${tk2}`);
+                    if (reqId !== currentMapRequestId) return;
+                    addMarker(start.lat, start.lon, `<b>Origin:</b> TK ${tk1}`);
+                    addMarker(busStop1.lat, busStop1.lon, `<b>OSY Stop: ${busStop1.name}</b><br/>Board Transit Line (Est.)`);
+                    addMarker(metroStation1.lat, metroStation1.lon, `<b>Metro: ${metroStation1.name}</b><br/>Transfer to connecting Bus`);
+                    addMarker(busStop2.lat, busStop2.lon, `<b>OSY Stop: ${busStop2.name}</b><br/>Walk to campus`);
+                    addMarker(end.lat, end.lon, `<b>Destination:</b> TK ${tk2}`);
+                }
             }
             else if (mode === 'transit2') {
-                await drawLegOnMap(reqId, 5001, 'walking', start, busStop1, '#059669', '6, 6', 4);
-                await drawLegOnMap(reqId, 5000, 'driving', busStop1, busStop2, '#d97706', null, 6);
-                await drawLegOnMap(reqId, 5001, 'walking', busStop2, end, '#059669', '6, 6', 4);
+                if (currentRoutesData.t2_legs) {
+                    for (const leg of currentRoutesData.t2_legs) {
+                        const coords = decodePolyline(leg.legGeometry.points);
+                        let color = '#3b82f6'; // default
+                        let dashArray = null;
+                        let weight = 6;
+                        if (leg.mode === 'WALK') {
+                            color = '#059669';
+                            dashArray = '6, 6';
+                            weight = 4;
+                        } else if (leg.mode === 'BUS') {
+                            color = '#f59e0b';
+                        }
+                        const underlay = L.polyline(coords, { color: '#090d16', weight: weight + 3, opacity: 0.75 }).addTo(map);
+                        const poly = L.polyline(coords, { color, weight, opacity: 1.0, dashArray }).addTo(map);
+                        mapLayers.push(underlay, poly);
+                        
+                        if (leg.transitLeg) {
+                            addMarker(leg.from.lat, leg.from.lon, `<b>${leg.mode}: ${leg.from.name}</b><br/>Board ${leg.route?.shortName || ''}`);
+                            addMarker(leg.to.lat, leg.to.lon, `<b>Arrival: ${leg.to.name}</b>`);
+                        }
+                    }
+                    addMarker(start.lat, start.lon, `<b>Origin:</b> TK ${tk1}`);
+                    addMarker(end.lat, end.lon, `<b>Destination:</b> TK ${tk2}`);
+                } else {
+                    await drawLegOnMap(reqId, 5001, 'walking', start, busStop1, '#059669', '6, 6', 4);
+                    await drawLegOnMap(reqId, 5000, 'driving', busStop1, busStop2, '#d97706', null, 6);
+                    await drawLegOnMap(reqId, 5001, 'walking', busStop2, end, '#059669', '6, 6', 4);
 
-                if (reqId !== currentMapRequestId) return;
-                addMarker(start.lat, start.lon, `<b>Origin:</b> TK ${tk1}`);
-                addMarker(busStop1.lat, busStop1.lon, `<b>OSY Stop: ${busStop1.name}</b><br/>Board Direct Bus A15`);
-                addMarker(busStop2.lat, busStop2.lon, `<b>OSY Stop: ${busStop2.name}</b><br/>Walk to campus`);
-                addMarker(end.lat, end.lon, `<b>Destination:</b> TK ${tk2}`);
+                    if (reqId !== currentMapRequestId) return;
+                    addMarker(start.lat, start.lon, `<b>Origin:</b> TK ${tk1}`);
+                    addMarker(busStop1.lat, busStop1.lon, `<b>OSY Stop: ${busStop1.name}</b><br/>Board Transit Line (Est.)`);
+                    addMarker(busStop2.lat, busStop2.lon, `<b>OSY Stop: ${busStop2.name}</b><br/>Walk to campus`);
+                    addMarker(end.lat, end.lon, `<b>Destination:</b> TK ${tk2}`);
+                }
             }
 
             if (reqId === currentMapRequestId) {

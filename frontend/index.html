@@ -390,14 +390,24 @@
                 </select>
             </div>
             <div style="display: flex; flex-direction: column; gap: 8px; margin: 4px 0;">
-                <label style="font-size: 0.70rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted);">Vehicle Availability (Student constraints)</label>
-                <div style="display: flex; gap: 16px;">
-                    <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer; color: var(--text-main);">
-                        <input type="checkbox" id="hasCar" onchange="calculateRoute()" style="accent-color: #38bdf8; width: 15px; height: 15px;"> Private Car
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer; color: var(--text-main);">
-                        <input type="checkbox" id="hasMoto" onchange="calculateRoute()" style="accent-color: #38bdf8; width: 15px; height: 15px;"> Motorcycle
-                    </label>
+                <label style="font-size: 0.70rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted);">Vehicle Availability</label>
+                <div class="input-grid">
+                    <div class="input-field">
+                        <label>Private Car</label>
+                        <select id="hasCar" onchange="calculateRoute()">
+                            <option value="unknown" selected>Don't Know</option>
+                            <option value="yes">Yes, I have</option>
+                            <option value="no">No, I don't</option>
+                        </select>
+                    </div>
+                    <div class="input-field">
+                        <label>Motorcycle</label>
+                        <select id="hasMoto" onchange="calculateRoute()">
+                            <option value="unknown" selected>Don't Know</option>
+                            <option value="yes">Yes, I have</option>
+                            <option value="no">No, I don't</option>
+                        </select>
+                    </div>
                 </div>
             </div>
             <button class="btn-calc" onclick="calculateRoute()">Calculate Optimal Routes</button>
@@ -620,19 +630,17 @@
             const t2_totalDur = t2_walk1 + t2_waitTotal + t2_inVehicleTotal + t2_walk2;
             const t2_co2Grams = Math.round(busDistKm * EF_BUS);
 
-            const hasCar = document.getElementById('hasCar').checked;
-            const hasMoto = document.getElementById('hasMoto').checked;
+            const carSelect = document.getElementById('hasCar').value;
+            const motoSelect = document.getElementById('hasMoto').value;
 
-            const ASC_CAR   = 12.0;
-            const ASC_MOTO  = 14.0;
-            const ASC_T1    = -8.0;
-            const ASC_T2    = -6.0;
+            const ASC_CAR   = 6.0;
+            const ASC_MOTO  = 9.0;
+            const ASC_T1    = -4.0;
+            const ASC_T2    = -2.0;
             const ASC_FOOT  = 0.0;
 
-            // Parking search penalty adjusted to +4.0 min for car (large campus parking) and +1.0 min for moto
-            // Running fuel/maintenance cost factor increased to 0.35 for car and 0.18 for moto
-            const C_car  = (carDurMin + 4.0) + (carDistKm * 0.35 * 5) + ASC_CAR;
-            const C_moto = (motoDurMin + 1.0) + (carDistKm * 0.18 * 5) + ASC_MOTO;
+            const C_car  = (carDurMin + 4.0) + (Math.pow(carDistKm, 0.85) * 0.35 * 5) + ASC_CAR;
+            const C_moto = (motoDurMin + 1.0) + (Math.pow(carDistKm, 0.85) * 0.18 * 5) + (carDistKm * 0.8) + ASC_MOTO;
             const C_t1   = (t1_inVehicleTotal + t1_walk1 + t1_walk2) + (1.2 * t1_waitTotal) + 4.0 + ASC_T1;
             const C_t2   = (t2_inVehicleTotal + t2_walk1 + t2_walk2) + (1.2 * t2_waitTotal) + ASC_T2;
             const C_foot = footDurMin * 1.1 + ASC_FOOT;
@@ -646,25 +654,50 @@
             const C_foot_adj = C_foot + footBias;
 
             const theta = 0.09;
-            const expCar  = hasCar ? Math.exp(-theta * C_car) : 0.0;
-            const expMoto = hasMoto ? Math.exp(-theta * C_moto) : 0.0;
-            const expT1   = Math.exp(-theta * C_t1);
-            const expT2   = Math.exp(-theta * C_t2);
-            const expFoot = Math.exp(-theta * C_foot_adj);
-            const sumExp  = expCar + expMoto + expT1 + expT2 + expFoot;
 
-            let pCar  = expCar / sumExp;
-            let pMoto = expMoto / sumExp;
-            let pT1   = expT1 / sumExp;
-            let pT2   = expT2 / sumExp;
-            let pFoot = expFoot / sumExp;
+            const getProbs = (c, m) => {
+                const expC  = c ? Math.exp(-theta * C_car) : 0.0;
+                const expM  = m ? Math.exp(-theta * C_moto) : 0.0;
+                const expT1 = Math.exp(-theta * C_t1);
+                const expT2 = Math.exp(-theta * C_t2);
+                const expF  = Math.exp(-theta * C_foot_adj);
+                const sumE  = expC + expM + expT1 + expT2 + expF;
+                return {
+                    pC: expC / sumE,
+                    pM: expM / sumE,
+                    pT1: expT1 / sumE,
+                    pT2: expT2 / sumE,
+                    pF: expF / sumE
+                };
+            };
 
-            const totalP = pCar + pMoto + pT1 + pT2 + pFoot;
-            const pctCar  = Math.round((pCar / totalP) * 100);
-            const pctMoto = Math.round((pMoto / totalP) * 100);
-            const pctT1   = Math.round((pT1 / totalP) * 100);
-            const pctT2   = Math.round((pT2 / totalP) * 100);
-            const pctFoot = 100 - (pctCar + pctMoto + pctT1 + pctT2);
+            let pCar = 0, pMoto = 0, pT1 = 0, pT2 = 0, pFoot = 0;
+            
+            let w_car = (carSelect === 'yes') ? 1.0 : (carSelect === 'no' ? 0.0 : 0.20);
+            let w_moto = (motoSelect === 'yes') ? 1.0 : (motoSelect === 'no' ? 0.0 : 0.15);
+            
+            const segments = [
+                { c: true,  m: true,  w: w_car * w_moto },
+                { c: true,  m: false, w: w_car * (1.0 - w_moto) },
+                { c: false, m: true,  w: (1.0 - w_car) * w_moto },
+                { c: false, m: false, w: (1.0 - w_car) * (1.0 - w_moto) }
+            ];
+            
+            for (let seg of segments) {
+                if (seg.w <= 0) continue;
+                const pr = getProbs(seg.c, seg.m);
+                pCar  += seg.w * pr.pC;
+                pMoto += seg.w * pr.pM;
+                pT1   += seg.w * pr.pT1;
+                pT2   += seg.w * pr.pT2;
+                pFoot += seg.w * pr.pF;
+            }
+
+            const pctCar = (pCar * 100).toFixed(0);
+            const pctMoto = (pMoto * 100).toFixed(0);
+            const pctT1 = (pT1 * 100).toFixed(0);
+            const pctT2 = (pT2 * 100).toFixed(0);
+            const pctFoot = (pFoot * 100).toFixed(0);
 
             const cardsData = [
                 {

@@ -354,12 +354,18 @@ def run_simulation(min_grade=0.0, max_grade=1.0, dataset_path=DATASET_PATH):
             try:
                 grade_val = float(grade_str)
                 if min_grade <= grade_val <= max_grade:
-                    filtered_students.append({'tk': tk, 'grade': grade_val, 'course': row['COURSE']})
+                    clean_tk = tk.strip()
+                    if clean_tk in local_postcodes:
+                        filtered_students.append({'tk': clean_tk, 'grade': grade_val, 'course': row['COURSE']})
+                    else:
+                        invalid_count += 1
             except ValueError:
                 continue
 
     print(f"============================================================")
     print(f"Filters: Found {len(filtered_students)} students with grade {min_grade} to {max_grade}")
+    if invalid_count > 0:
+        print(f"Excluded {invalid_count} students (postcode out of Attica or invalid)")
     print(f"============================================================\n")
 
     total_co2_grams = 0.0
@@ -372,16 +378,12 @@ def run_simulation(min_grade=0.0, max_grade=1.0, dataset_path=DATASET_PATH):
         go_res = compute_student_route_and_co2(s['tk'], is_peak=True, reverse=False)
         
         if not go_res:
-            invalid_count += 1
-            print(f"Student {i:02d} (Postcode {s['tk']}) excluded: invalid postcode or out of Attica")
             continue
 
         # Return leg (passing go_mode_id to enforce logic constraints)
         ret_res = compute_student_route_and_co2(s['tk'], is_peak=False, reverse=True, go_mode_id=go_res['chosen_mode_id'])
         
         if not ret_res:
-            invalid_count += 1
-            print(f"Student {i:02d} (Postcode {s['tk']}) excluded: error on return leg")
             continue
 
         valid_simulated += 1

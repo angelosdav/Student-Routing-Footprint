@@ -51,10 +51,10 @@ EF_METRO = 3.1
 EF_FOOT  = 0.0
 
 # Mode bias values (Alternative-Specific Constants)
-ASC_CAR   = 12.0
-ASC_MOTO  = 14.0
-ASC_T1    = -8.0
-ASC_T2    = -6.0
+ASC_CAR   = 6.0
+ASC_MOTO  = 9.0
+ASC_T1    = -4.0
+ASC_T2    = -2.0
 ASC_FOOT  = 0.0
 THETA     = 0.09
 

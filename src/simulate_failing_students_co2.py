@@ -124,7 +124,7 @@ def haversine_km(lat1, lon1, lat2, lon2):
     a = math.sin(dphi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2)**2
     return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-def compute_student_route_and_co2(tk, is_peak=True, reverse=False):
+def compute_student_route_and_co2(tk, is_peak=True, reverse=False, go_mode_id=None):
     clean_tk = str(tk).strip()
     if clean_tk not in local_postcodes:
         return None
@@ -134,8 +134,13 @@ def compute_student_route_and_co2(tk, is_peak=True, reverse=False):
 
     # Vehicle availability constraints
     h = pseudo_hash(clean_tk)
-    has_car = (h % 100 < 20)
-    has_moto = ((h >> 2) % 100 < 15)
+    
+    if go_mode_id in ['transit1', 'transit2', 'foot']:
+        has_car = False
+        has_moto = False
+    else:
+        has_car = (h % 100 < 20)
+        has_moto = ((h >> 2) % 100 < 15)
 
     # Route options
     if not reverse:
@@ -280,11 +285,18 @@ def compute_student_route_and_co2(tk, is_peak=True, reverse=False):
     C_foot_adj = C_foot + foot_bias
 
     # Mode probabilities
-    exp_car  = math.exp(-THETA * C_car) if has_car else 0.0
-    exp_moto = math.exp(-THETA * C_moto) if has_moto else 0.0
-    exp_t1   = math.exp(-THETA * C_t1)
-    exp_t2   = math.exp(-THETA * C_t2)
-    exp_foot = math.exp(-THETA * C_foot_adj)
+    if go_mode_id in ['car', 'moto']:
+        exp_car  = 1.0 if go_mode_id == 'car' else 0.0
+        exp_moto = 1.0 if go_mode_id == 'moto' else 0.0
+        exp_t1   = 0.0
+        exp_t2   = 0.0
+        exp_foot = 0.0
+    else:
+        exp_car  = math.exp(-THETA * C_car) if has_car else 0.0
+        exp_moto = math.exp(-THETA * C_moto) if has_moto else 0.0
+        exp_t1   = math.exp(-THETA * C_t1)
+        exp_t2   = math.exp(-THETA * C_t2)
+        exp_foot = math.exp(-THETA * C_foot_adj)
     sum_exp  = exp_car + exp_moto + exp_t1 + exp_t2 + exp_foot
 
     p_car  = exp_car / sum_exp
@@ -358,12 +370,18 @@ def run_simulation(min_grade=0.0, max_grade=1.0, dataset_path=DATASET_PATH):
     for i, s in enumerate(filtered_students, 1):
         # Go leg
         go_res = compute_student_route_and_co2(s['tk'], is_peak=True, reverse=False)
-        # Return leg
-        ret_res = compute_student_route_and_co2(s['tk'], is_peak=False, reverse=True)
-
-        if not go_res or not ret_res:
+        
+        if not go_res:
             invalid_count += 1
             print(f"Student {i:02d} (Postcode {s['tk']}) excluded: invalid postcode or out of Attica")
+            continue
+
+        # Return leg (passing go_mode_id to enforce logic constraints)
+        ret_res = compute_student_route_and_co2(s['tk'], is_peak=False, reverse=True, go_mode_id=go_res['chosen_mode_id'])
+        
+        if not ret_res:
+            invalid_count += 1
+            print(f"Student {i:02d} (Postcode {s['tk']}) excluded: error on return leg")
             continue
 
         valid_simulated += 1

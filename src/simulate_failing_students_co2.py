@@ -369,6 +369,24 @@ def run_simulation(min_grade=0.0, max_grade=1.0, dataset_path=DATASET_PATH):
         print(f"Excluded {invalid_count} students (postcode out of Attica or invalid)")
     print(f"============================================================\n")
 
+    print("Checking Docker APIs connectivity...")
+    # Do a quick test query to check if we are guessing or not
+    test_osrm = fetch_osrm_route(5000, "driving", 37.9838, 23.7275, DEST_LAT, DEST_LON)
+    test_otp = fetch_otp_transit_routes(37.9838, 23.7275, DEST_LAT, DEST_LON, "2026-07-22", "08:00")
+    
+    is_guessing = False
+    if test_osrm is None and (test_otp is None or len(test_otp) == 0):
+        print(" -> [WARNING] Both OSRM and OTP are offline! The simulation will GUESS all routes (Empirical Fallback).\n")
+        is_guessing = True
+    elif test_osrm is None:
+        print(" -> [WARNING] OSRM is offline! Car/Foot routes will be GUESSED. Transit will use Live OTP.\n")
+        is_guessing = True
+    elif test_otp is None or len(test_otp) == 0:
+        print(" -> [WARNING] OTP is offline! Transit routes will be GUESSED. Car/Foot will use Live OSRM.\n")
+        is_guessing = True
+    else:
+        print(" -> [OK] Connected to local Docker OSRM and OTP successfully. Using LIVE data.\n")
+
     total_co2_grams = 0.0
     mode_counts = {'transit1': 0, 'transit2': 0, 'car': 0, 'moto': 0, 'foot': 0}
     mode_co2    = {'transit1': 0, 'transit2': 0, 'car': 0, 'moto': 0, 'foot': 0}

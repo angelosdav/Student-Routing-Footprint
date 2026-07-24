@@ -332,6 +332,46 @@ def compute_student_route_and_co2(tk, is_peak=True, reverse=False, go_mode_id=No
             chosen_mode = mode
             break
 
+    # Dynamic Luck/Error simulation per trip leg
+    p_traffic_incident = 0.40 if is_peak else 0.15
+    max_traffic_delay = 25.0
+    
+    max_bus_wait_delay = 12.0 if is_peak else 25.0
+    p_bus_late = 0.30 if is_peak else 0.15
+    
+    error_car = 0.0
+    error_bus_wait = 0.0
+    error_metro = 0.0
+    
+    # 1. Traffic Error
+    if random.random() < p_traffic_incident:
+        error_car = min(random.expovariate(1.0 / 10.0), max_traffic_delay)
+    else:
+        error_car = min(random.expovariate(1.0 / 2.0), 5.0)
+        
+    # 2. Bus Wait Error
+    if random.random() < p_bus_late:
+        error_bus_wait = min(random.expovariate(1.0 / (max_bus_wait_delay / 2.0)), max_bus_wait_delay)
+    
+    # 3. Metro Error
+    if random.random() < 0.02:
+        error_metro = min(random.expovariate(1.0 / 5.0), 10.0)
+
+    chosen_id = chosen_mode[0]
+    base_dur = chosen_mode[4]
+    total_error = 0.0
+    
+    if chosen_id == 'car':
+        total_error = error_car
+    elif chosen_id == 'moto':
+        total_error = error_car * 0.30
+    elif chosen_id == 'transit1':
+        total_error = error_bus_wait + error_car + error_metro
+    elif chosen_id == 'transit2':
+        total_error = error_bus_wait + error_car
+    
+    final_dur_min = base_dur + total_error
+
     return {
         'tk': clean_tk,
         'dist_km': round(car_dist_km, 2),
@@ -339,7 +379,8 @@ def compute_student_route_and_co2(tk, is_peak=True, reverse=False, go_mode_id=No
         'chosen_mode_id': chosen_mode[0],
         'chosen_mode_name': chosen_mode[1],
         'chosen_co2_grams': chosen_mode[3],
-        'chosen_dur_min': round(chosen_mode[4], 1)
+        'chosen_dur_min': round(final_dur_min, 1),
+        'delay_min': round(total_error, 1)
     }
 
 def run_simulation(min_grade=0.0, max_grade=1.0, dataset_path=DATASET_PATH):
@@ -437,8 +478,8 @@ def run_simulation(min_grade=0.0, max_grade=1.0, dataset_path=DATASET_PATH):
             mode_co2[ret_id] += ret_co2
 
             print(f"Student {i:02d} (Postcode {s['tk']} | Grade {s['grade']}):\n"
-                  f"   Outbound (Peak): {go_name:<26} | CO2: {go_co2:>3} g | Time: {go_dur:>4} min\n"
-                  f"   Inbound (Off Peak): {ret_name:<26} | CO2: {ret_co2:>3} g | Time: {ret_dur:>4} min\n"
+                  f"   Outbound (Peak): {go_name:<26} | CO2: {go_co2:>3} g | Time: {go_dur:>4.1f} min (+{go_res.get('delay_min', 0):>4.1f}m delay)\n"
+                  f"   Inbound (Off Peak): {ret_name:<26} | CO2: {ret_co2:>3} g | Time: {ret_dur:>4.1f} min (+{ret_res.get('delay_min', 0):>4.1f}m delay)\n"
                   f"   Round Trip Footprint: {student_co2} g CO2eq\n")
 
     print(f"\n============================================================")

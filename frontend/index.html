@@ -346,38 +346,38 @@
                 <div class="input-field">
                     <label>Destination University / Campus</label>
                     <select id="tkEnd" onchange="calculateRoute()">
-                        <optgroup label="ΕΚΠΑ (Εθνικό & Καποδιστριακό)">
-                            <option value="15784">Πανεπιστημιούπολη (Ζωγράφου) - 157 84</option>
-                            <option value="11527">Γουδή (Επιστημών Υγείας) - 115 27</option>
+                        <optgroup label="ΕΚΠΑ">
+                            <option value="15784">Ζωγράφου - 157 84</option>
+                            <option value="11527">Γουδή (Ιατρική) - 115 27</option>
                             <option value="10679">Κέντρο (Προπύλαια) - 106 79</option>
                             <option value="17237">Δάφνη (ΣΕΦΑΑ) - 172 37</option>
                         </optgroup>
-                        <optgroup label="ΕΜΠ (Εθνικό Μετσόβιο Πολυτεχνείο)">
-                            <option value="15780">Πολυτεχνειούπολη (Ζωγράφου) - 157 80</option>
-                            <option value="10682">Πατησίων (Ιστορικό Συγκρότημα) - 106 82</option>
+                        <optgroup label="ΕΜΠ (Πολυτεχνείο)">
+                            <option value="15780">Ζωγράφου - 157 80</option>
+                            <option value="10682">Πατησίων - 106 82</option>
                         </optgroup>
-                        <optgroup label="ΟΠΑ (Οικονομικό Πανεπιστήμιο Αθηνών)">
-                            <option value="10434">Πατησίων (Κεντρικό Κτίριο) - 104 34</option>
-                            <option value="11362">Ευελπίδων (Μεταπτυχιακά) - 113 62</option>
+                        <optgroup label="ΟΠΑ (ΑΣΟΕΕ)">
+                            <option value="10434">Πατησίων (Κεντρικό) - 104 34</option>
+                            <option value="11362">Ευελπίδων - 113 62</option>
                             <option value="11257">Τροίας - 112 57</option>
                         </optgroup>
-                        <optgroup label="ΠΑΔΑ (Πανεπιστήμιο Δυτικής Αττικής)">
+                        <optgroup label="ΠΑΔΑ">
                             <option value="12243" selected>Άλσος Αιγάλεω - 122 43</option>
                             <option value="12244">Αρχαίος Ελαιώνας - 122 44</option>
                             <option value="11521">Αμπελόκηποι (ΕΣΔΥ) - 115 21</option>
                         </optgroup>
-                        <optgroup label="ΠΑΠΕΙ (Πανεπιστήμιο Πειραιώς)">
-                            <option value="18534">Πειραιάς (Κεντρικό Κτίριο) - 185 34</option>
+                        <optgroup label="ΠΑΠΕΙ">
+                            <option value="18534">Πειραιάς (Κεντρικό) - 185 34</option>
                             <option value="18532">Γρ. Λαμπράκη - 185 32</option>
                         </optgroup>
-                        <optgroup label="Άλλα Πανεπιστήμια & Σχολές">
-                            <option value="17121">Πάντειον Πανεπιστήμιο - 171 21</option>
+                        <optgroup label="Άλλες Σχολές">
+                            <option value="17121">Πάντειον - 171 21</option>
                             <option value="11855">Γεωπονικό (Βοτανικός) - 118 55</option>
-                            <option value="17676">Χαροκόπειο (Καλλιθέα) - 176 76</option>
+                            <option value="17676">Χαροκόπειο - 176 76</option>
                             <option value="18233">ΑΣΚΤ (Ταύρος) - 182 33</option>
-                            <option value="10105">Σχολή Ικάρων (Τατόι) - 101 05</option>
-                            <option value="18539">Σχολή Ναυτικών Δοκίμων - 185 39</option>
-                            <option value="16673">Σχολή Ευελπίδων (Βάρη) - 166 73</option>
+                            <option value="10105">Σχολή Ικάρων - 101 05</option>
+                            <option value="18539">Ναυτικών Δοκίμων - 185 39</option>
+                            <option value="16673">Σχολή Ευελπίδων - 166 73</option>
                         </optgroup>
                     </select>
                 </div>
@@ -697,7 +697,9 @@
             let t1_otp = null;
             let t2_otp = null;
 
-            for (const itin of otpItineraries) {
+            const safeItineraries = otpItineraries || [];
+            
+            for (const itin of safeItineraries) {
                 const legs = itin.legs || [];
                 const hasMetro = legs.some(leg => ['SUBWAY', 'TRAM', 'RAIL'].includes(leg.mode));
                 const hasBus = legs.some(leg => leg.mode === 'BUS');
@@ -766,11 +768,12 @@
             const busDistKm = (straightKm * 1.15);
 
             // Transit 1 (Metro + Bus) Duration & Metrics
-            let t1_totalDur, t1_inVehicleTotal, t1_waitTotal, t1_co2Grams, t1_stepsHTML;
+            let t1_totalDur, t1_inVehicleTotal, t1_waitTotal, t1_walkTotal, t1_co2Grams, t1_stepsHTML;
             if (t1_otp) {
                 t1_totalDur = t1_otp.dur;
                 t1_inVehicleTotal = t1_otp.inVehicle;
                 t1_waitTotal = t1_otp.wait;
+                t1_walkTotal = t1_otp.walk;
                 t1_co2Grams = t1_otp.co2;
                 t1_stepsHTML = generateTransitStepsHTML(t1_otp.legs, tk1, tk2);
             } else if (!otpOnline) {
@@ -782,7 +785,8 @@
                 const t1_walk2 = 3;
                 t1_inVehicleTotal = t1_inMetro + t1_inBus;
                 t1_waitTotal = t1_wait1 + t1_wait2;
-                t1_totalDur = t1_walk1 + t1_waitTotal + t1_inVehicleTotal + t1_walk2;
+                t1_walkTotal = t1_walk1 + t1_walk2;
+                t1_totalDur = t1_walkTotal + t1_waitTotal + t1_inVehicleTotal;
                 t1_co2Grams = Math.round((busDistKm * 0.45 * EF_METRO) + (busDistKm * 0.55 * EF_BUS));
                 t1_stepsHTML = `
                     <div class="step-row"><div><span class="step-tag">Walk</span><span class="step-title-text">Walk to Bus Stop</span><div class="step-subtext">Origin (TK ${tk1})</div></div><span class="step-meta">${t1_walk1} min</span></div>
@@ -796,16 +800,18 @@
                 t1_totalDur = 9999;
                 t1_inVehicleTotal = 9999;
                 t1_waitTotal = 9999;
+                t1_walkTotal = 9999;
                 t1_co2Grams = 0;
                 t1_stepsHTML = `<div class="step-row"><span class="step-tag" style="background:#e11d48">N/A</span><span class="step-title-text">No route found</span></div>`;
             }
 
             // Transit 2 (Direct Bus) Duration & Metrics
-            let t2_totalDur, t2_inVehicleTotal, t2_waitTotal, t2_co2Grams, t2_stepsHTML;
+            let t2_totalDur, t2_inVehicleTotal, t2_waitTotal, t2_walkTotal, t2_co2Grams, t2_stepsHTML;
             if (t2_otp) {
                 t2_totalDur = t2_otp.dur;
                 t2_inVehicleTotal = t2_otp.inVehicle;
                 t2_waitTotal = t2_otp.wait;
+                t2_walkTotal = t2_otp.walk;
                 t2_co2Grams = t2_otp.co2;
                 t2_stepsHTML = generateTransitStepsHTML(t2_otp.legs, tk1, tk2);
             } else if (!otpOnline) {
@@ -815,7 +821,8 @@
                 const t2_walk2 = 4;
                 t2_inVehicleTotal = t2_inBus;
                 t2_waitTotal = t2_wait1;
-                t2_totalDur = t2_walk1 + t2_waitTotal + t2_inVehicleTotal + t2_walk2;
+                t2_walkTotal = t2_walk1 + t2_walk2;
+                t2_totalDur = t2_walkTotal + t2_waitTotal + t2_inVehicleTotal;
                 t2_co2Grams = Math.round(busDistKm * EF_BUS);
                 t2_stepsHTML = `
                     <div class="step-row"><div><span class="step-tag">Walk</span><span class="step-title-text">Walk to Bus Stop</span><div class="step-subtext">Origin (TK ${tk1})</div></div><span class="step-meta">${t2_walk1} min</span></div>
@@ -827,6 +834,7 @@
                 t2_totalDur = 9999;
                 t2_inVehicleTotal = 9999;
                 t2_waitTotal = 9999;
+                t2_walkTotal = 9999;
                 t2_co2Grams = 0;
                 t2_stepsHTML = `<div class="step-row"><span class="step-tag" style="background:#e11d48">N/A</span><span class="step-title-text">No route found</span></div>`;
             }
@@ -842,8 +850,8 @@
 
             const C_car  = (carDurMin + 4.0) + (Math.pow(carDistKm, 0.85) * 0.35 * 5) + ASC_CAR;
             const C_moto = (motoDurMin + 1.0) + (Math.pow(carDistKm, 0.85) * 0.18 * 5) + (carDistKm * 0.8) + ASC_MOTO;
-            const C_t1   = (t1_inVehicleTotal + t1_walk1 + t1_walk2) + (1.2 * t1_waitTotal) + 4.0 + ASC_T1;
-            const C_t2   = (t2_inVehicleTotal + t2_walk1 + t2_walk2) + (1.2 * t2_waitTotal) + ASC_T2;
+            const C_t1   = (t1_inVehicleTotal + t1_walkTotal) + (1.2 * t1_waitTotal) + 4.0 + ASC_T1;
+            const C_t2   = (t2_inVehicleTotal + t2_walkTotal) + (1.2 * t2_waitTotal) + ASC_T2;
             const C_foot = footDurMin * 1.1 + ASC_FOOT;
 
             let footBias = 0;
@@ -933,6 +941,11 @@
                 },
                 {
                     mode: 'transit2',
+                    name: 'Bus-Only Transit',
+                    pct: pctT2,
+                    dur: t2_totalDur,
+                    co2: t2_co2Grams,
+                    html: `
                 <div class="card" id="card-transit2" onclick="showOnMap('transit2')">
                     <div class="card-header">
                         <span class="mode-title">Bus-Only Transit</span>

@@ -125,7 +125,7 @@ def haversine_km(lat1, lon1, lat2, lon2):
     a = math.sin(dphi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2)**2
     return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-def compute_student_route_and_co2(tk, is_peak=True, reverse=False, go_mode_id=None):
+def compute_student_route_and_co2(tk, is_peak=True, reverse=False, go_mode_id=None, is_driver=False):
     clean_tk = str(tk).strip()
     if clean_tk not in local_postcodes:
         return None
@@ -286,18 +286,43 @@ def compute_student_route_and_co2(tk, is_peak=True, reverse=False, go_mode_id=No
     C_foot_adj = C_foot + foot_bias
 
     # Mode probabilities
-    if go_mode_id in ['car', 'moto']:
+    if go_mode_id in ['car', 'moto'] and is_driver:
         exp_car  = 1.0 if go_mode_id == 'car' else 0.0
         exp_moto = 1.0 if go_mode_id == 'moto' else 0.0
         exp_t1   = 0.0
         exp_t2   = 0.0
         exp_foot = 0.0
     else:
-        exp_car  = math.exp(-THETA * C_car) if has_car else 0.0
-        exp_moto = math.exp(-THETA * C_moto) if has_moto else 0.0
-        exp_t1   = math.exp(-THETA * C_t1)
-        exp_t2   = math.exp(-THETA * C_t2)
-        exp_foot = math.exp(-THETA * C_foot_adj)
+        is_convenience_return = False
+        if reverse and go_mode_id not in ['car', 'moto']:
+            # 80% chance to stick to the same transit/foot mode due to convenience
+            if random.random() < 0.80:
+                is_convenience_return = True
+
+        if is_convenience_return:
+            exp_car  = 0.0
+            exp_moto = 0.0
+            exp_t1   = 1.0 if go_mode_id == 'transit1' else 0.0
+            exp_t2   = 1.0 if go_mode_id == 'transit2' else 0.0
+            exp_foot = 1.0 if go_mode_id == 'foot' else 0.0
+        else:
+            exp_car  = math.exp(-THETA * C_car) if (has_car and not reverse) else 0.0
+            exp_moto = math.exp(-THETA * C_moto) if (has_moto and not reverse) else 0.0
+            exp_t1   = math.exp(-THETA * C_t1)
+            exp_t2   = math.exp(-THETA * C_t2)
+            exp_foot = math.exp(-THETA * C_foot_adj)
+            
+            # Inbound Lift Probabilities (If they don't have a personal car parked at campus)
+            if reverse:
+                p_inbound_carpool = max(0.0, 0.20 - (0.005 * car_dist_km))
+                p_inbound_pickup  = max(0.0, 0.08 - (0.007 * car_dist_km))
+                p_total_lift = p_inbound_carpool + p_inbound_pickup
+                
+                if p_total_lift > 0 and random.random() < p_total_lift:
+                    exp_car = 1.0
+                    exp_moto = 0.0
+                    exp_t1 = 0.0; exp_t2 = 0.0; exp_foot = 0.0
+
     sum_exp  = exp_car + exp_moto + exp_t1 + exp_t2 + exp_foot
 
     p_car  = exp_car / sum_exp
@@ -371,16 +396,60 @@ def compute_student_route_and_co2(tk, is_peak=True, reverse=False, go_mode_id=No
         total_error = error_bus_wait + error_car
     
     final_dur_min = base_dur + total_error
+    
+    # Context CO2 logic (Driver, Drop-off, Carpool)
+    co2_multiplier = 1.0
+    outbound_is_driver = False
+    context_name = ""
+    
+    if not reverse and chosen_id in ['car', 'moto']:
+        base_p_carpool = 0.25
+        base_p_dropoff = 0.15
+        p_carpool = max(0.0, base_p_carpool - (0.005 * car_dist_km))
+        p_dropoff = max(0.0, base_p_dropoff - (0.007 * car_dist_km))
+        p_driver = 1.0 - p_carpool - p_dropoff
+        
+        rand_context = random.random()
+        if rand_context < p_driver:
+            outbound_is_driver = True
+            co2_multiplier = 1.0
+            context_name = "Driver"
+        elif rand_context < (p_driver + p_dropoff):
+            outbound_is_driver = False
+            co2_multiplier = 2.0
+            context_name = "Drop-off"
+        else:
+            outbound_is_driver = False
+            co2_multiplier = 0.5
+            context_name = "Carpool"
+            
+    elif reverse and chosen_id == 'car' and not is_driver:
+        p_inbound_carpool = max(0.0, 0.20 - (0.005 * car_dist_km))
+        p_inbound_pickup  = max(0.0, 0.08 - (0.007 * car_dist_km))
+        p_total_lift = p_inbound_carpool + p_inbound_pickup
+        
+        if p_total_lift <= 0:
+            co2_multiplier = 0.5
+            context_name = "Carpool"
+        elif random.random() < (p_inbound_carpool / p_total_lift):
+            co2_multiplier = 0.5
+            context_name = "Carpool"
+        else:
+            co2_multiplier = 2.0
+            context_name = "Pick-up"
+            
+    final_co2 = chosen_mode[3] * co2_multiplier
 
     return {
         'tk': clean_tk,
         'dist_km': round(car_dist_km, 2),
         'probabilities': {m[0]: round(m[2]*100, 1) for m in modes},
         'chosen_mode_id': chosen_mode[0],
-        'chosen_mode_name': chosen_mode[1],
-        'chosen_co2_grams': chosen_mode[3],
+        'chosen_mode_name': chosen_mode[1] + (f" [{context_name}]" if context_name else ""),
+        'chosen_co2_grams': round(final_co2),
         'chosen_dur_min': round(final_dur_min, 1),
-        'delay_min': round(total_error, 1)
+        'delay_min': round(total_error, 1),
+        'is_driver': outbound_is_driver
     }
 
 def run_simulation(min_grade=0.0, max_grade=1.0, dataset_path=DATASET_PATH):
@@ -439,7 +508,13 @@ def run_simulation(min_grade=0.0, max_grade=1.0, dataset_path=DATASET_PATH):
         if not go_res:
             return None
             
-        ret_res = compute_student_route_and_co2(s['tk'], is_peak=False, reverse=True, go_mode_id=go_res['chosen_mode_id'])
+        ret_res = compute_student_route_and_co2(
+            s['tk'], 
+            is_peak=False, 
+            reverse=True, 
+            go_mode_id=go_res['chosen_mode_id'],
+            is_driver=go_res['is_driver']
+        )
         if not ret_res:
             return None
             

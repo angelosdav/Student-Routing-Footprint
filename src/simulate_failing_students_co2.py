@@ -91,9 +91,11 @@ def fetch_otp_transit_routes(lat1, lon1, lat2, lon2, date_str, time_str):
         from: {{ lat: {lat1}, lon: {lon1} }},
         to: {{ lat: {lat2}, lon: {lon2} }},
         date: "{date_str}",
-        time: "{time_str}"
+        time: "{time_str}",
+        walkReluctance: 5.0
       ) {{
         itineraries {{
+          startTime
           duration
           waitingTime
           walkTime

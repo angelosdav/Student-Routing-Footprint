@@ -327,6 +327,47 @@
             font-weight: 600;
             padding: 8px;
         }
+
+        .map-legend {
+            position: absolute;
+            bottom: 30px;
+            right: 20px;
+            background: rgba(9, 13, 22, 0.90);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 14px 18px;
+            z-index: 1000;
+            backdrop-filter: blur(8px);
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .legend-title {
+            font-size: 0.70rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 0.82rem;
+            font-weight: 500;
+        }
+
+        .legend-line {
+            width: 24px;
+            height: 4px;
+            border-radius: 2px;
+        }
     </style>
 </head>
 <body>
@@ -383,10 +424,14 @@
                 </div>
             </div>
             <div class="input-field">
-                <label>Traffic Conditions / Time Scenario</label>
-                <select id="timeScenario" onchange="calculateRoute()">
-                    <option value="peak" selected>Peak Hours (08:00-10:00 / 16:00-18:00)</option>
-                    <option value="offpeak">Off-Peak / Off-Peak Hours</option>
+                <label>Departure Time</label>
+                <select id="timeScenario" onchange="handleTimeChange()">
+                    <option value="live" id="liveTimeOption">Now (Live)</option>
+                    <option value="08:00">08:00 (Morning Peak)</option>
+                    <option value="10:00">10:00 (Off-Peak)</option>
+                    <option value="14:00">14:00 (Off-Peak)</option>
+                    <option value="17:00">17:00 (Evening Peak)</option>
+                    <option value="21:00">21:00 (Night Off-Peak)</option>
                 </select>
             </div>
             <div style="display: flex; flex-direction: column; gap: 8px; margin: 4px 0;">
@@ -419,6 +464,14 @@
         </div>
     </div>
 
+    <div class="map-legend">
+        <div class="legend-title">Υπομνημα Διαδρομων</div>
+        <div class="legend-item"><div class="legend-line" style="background: #0284c7;"></div><span>Αυτοκίνητο (Car)</span></div>
+        <div class="legend-item"><div class="legend-line" style="background: #d946ef;"></div><span>Μηχανή (Moto)</span></div>
+        <div class="legend-item"><div class="legend-line" style="background: #ef4444;"></div><span>Μετρό (Subway)</span></div>
+        <div class="legend-item"><div class="legend-line" style="background: #f59e0b;"></div><span>Λεωφορείο (Bus)</span></div>
+        <div class="legend-item"><div class="legend-line" style="border-top: 4px dashed #059669; height:0; background:transparent;"></div><span>Περπάτημα (Walk)</span></div>
+    </div>
     <div id="map"></div>
 
     <!-- Leaflet JS -->
@@ -570,9 +623,11 @@
                 from: { lat: ${start.lat}, lon: ${start.lon} },
                 to: { lat: ${end.lat}, lon: ${end.lon} },
                 date: "${date}",
-                time: "${time}"
+                time: "${time}",
+                walkReluctance: 5.0
               ) {
                 itineraries {
+                  startTime
                   duration
                   waitingTime
                   walkTime
@@ -671,8 +726,13 @@
         async function calculateRoute() {
             const tk1 = document.getElementById('tkStart').value.trim();
             const tk2 = document.getElementById('tkEnd').value.trim();
-            const scenario = document.getElementById('timeScenario').value;
-            const isPeak = (scenario === 'peak');
+            let timeStr = document.getElementById('timeScenario').value;
+            if (timeStr === 'live') {
+                const now = new Date();
+                timeStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+            }
+            const hour = parseInt(timeStr.split(':')[0]);
+            const isPeak = (hour >= 8 && hour < 10) || (hour >= 16 && hour < 18);
 
             const loadingState = document.getElementById('loadingState');
             const resultsDiv = document.getElementById('results');
@@ -690,7 +750,6 @@
 
             // Query OpenTripPlanner
             const dateStr = "2026-07-22"; // Wednesday target
-            const timeStr = isPeak ? "08:00" : "14:00";
             const otpItineraries = await fetchOTP(start, end, dateStr, timeStr);
             const otpOnline = (otpItineraries !== null);
 
@@ -715,17 +774,26 @@
                 });
 
                 const durMin = Math.round(itin.duration / 60);
-                const waitMin = Math.round(itin.waitingTime / 60);
+                const apiWaitMin = Math.round(itin.waitingTime / 60);
                 const walkMin = Math.round(itin.walkTime / 60);
-                const inVehicleMin = Math.max(0, durMin - waitMin - walkMin);
+                const inVehicleMin = Math.max(0, durMin - apiWaitMin - walkMin);
+
+                // Calculate initial wait time (time from requested time until you must leave your house)
+                const requestedDate = new Date(`${dateStr}T${timeStr}:00`);
+                const requestedEpoch = requestedDate.getTime();
+                const initialWaitMs = Math.max(0, itin.startTime - requestedEpoch);
+                const initialWaitMin = Math.round(initialWaitMs / 60000);
+
+                const totalWaitMin = apiWaitMin + initialWaitMin;
+                const totalDurMin = durMin + initialWaitMin;
 
                 if (hasMetro) {
-                    if (!t1_otp || durMin < t1_otp.dur) {
-                        t1_otp = { dur: durMin, wait: waitMin, walk: walkMin, inVehicle: inVehicleMin, co2: Math.round(co2_g), legs };
+                    if (!t1_otp || totalDurMin < t1_otp.dur) {
+                        t1_otp = { dur: totalDurMin, wait: totalWaitMin, walk: walkMin, inVehicle: inVehicleMin, co2: Math.round(co2_g), legs };
                     }
                 } else if (hasBus) {
-                    if (!t2_otp || durMin < t2_otp.dur) {
-                        t2_otp = { dur: durMin, wait: waitMin, walk: walkMin, inVehicle: inVehicleMin, co2: Math.round(co2_g), legs };
+                    if (!t2_otp || totalDurMin < t2_otp.dur) {
+                        t2_otp = { dur: totalDurMin, wait: totalWaitMin, walk: walkMin, inVehicle: inVehicleMin, co2: Math.round(co2_g), legs };
                     }
                 }
             }
@@ -918,7 +986,7 @@
                     dur: t1_totalDur,
                     co2: t1_co2Grams,
                     html: `
-                <div class="card" id="card-transit1" onclick="showOnMap('transit1')">
+                <div class="card" id="card-transit1" ${t1_totalDur !== 9999 ? `onclick="showOnMap('transit1')"` : `style="cursor:not-allowed; opacity:0.7;"`}>
                     <div class="card-header">
                         <span class="mode-title">Metro + Bus Transit</span>
                         <span class="card-badge">Logit: ${pctT1}% P(i)</span>
@@ -946,7 +1014,7 @@
                     dur: t2_totalDur,
                     co2: t2_co2Grams,
                     html: `
-                <div class="card" id="card-transit2" onclick="showOnMap('transit2')">
+                <div class="card" id="card-transit2" ${t2_totalDur !== 9999 ? `onclick="showOnMap('transit2')"` : `style="cursor:not-allowed; opacity:0.7;"`}>
                     <div class="card-header">
                         <span class="mode-title">Bus-Only Transit</span>
                         <span class="card-badge">Logit: ${pctT2}% P(i)</span>
@@ -997,7 +1065,7 @@
                     dur: motoDurMin.toFixed(1),
                     co2: motoCO2Grams,
                     html: `
-                <div class="card" id="card-moto" onclick="showOnMap('car')">
+                <div class="card" id="card-moto" onclick="showOnMap('moto')">
                     <div class="card-header">
                         <span class="mode-title">Motorcycle</span>
                         <span class="card-badge">Logit: ${pctMoto}% P(i)</span>
@@ -1198,6 +1266,43 @@
                 map.fitBounds(bounds, { padding: [60, 60] });
             }
         }
+
+        let clockInterval;
+        let isLiveTime = true;
+        let lastCalculatedLiveMinute = -1;
+        
+        function updateClock() {
+            const now = new Date();
+            const currentStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+            
+            const liveOption = document.getElementById('liveTimeOption');
+            if (liveOption) {
+                liveOption.textContent = `Now (${currentStr})`;
+            }
+
+            if (isLiveTime && now.getMinutes() !== lastCalculatedLiveMinute) {
+                lastCalculatedLiveMinute = now.getMinutes();
+                if (lastCalculatedLiveMinute !== -1) {
+                    calculateRoute();
+                }
+            }
+        }
+
+        function handleTimeChange() {
+            const val = document.getElementById('timeScenario').value;
+            if (val === 'live') {
+                isLiveTime = true;
+                const now = new Date();
+                lastCalculatedLiveMinute = now.getMinutes();
+            } else {
+                isLiveTime = false;
+            }
+            calculateRoute();
+        }
+
+        // Initialize clock
+        updateClock();
+        clockInterval = setInterval(updateClock, 1000);
 
         window.onload = calculateRoute;
     </script>

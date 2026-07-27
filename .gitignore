@@ -216,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# OSRM Data
+osrm_data/
+
+# OTP Data (Bus/Metro Graph)
+data/otp-data/
+
+# Python Virtual Env
+venv_3/

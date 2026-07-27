@@ -1,0 +1,20 @@
+{
+  "policy": {
+    "max_unnecessary_grade": 1.0,
+    "use_marginal_pt_emissions": false
+  },
+  "mnl_model": {
+    "beta_time": -0.05,
+    "asc_car": 0.0,
+    "asc_pt": 1.2,
+    "asc_walk": 1.5
+  },
+  "simulation": {
+    "n_simulations": 10000,
+    "random_seed": 42
+  },
+  "data": {
+    "university_tk": "12241",
+    "students_csv_path": "data/students_data.csv"
+  }
+}

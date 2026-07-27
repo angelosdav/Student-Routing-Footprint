@@ -89,9 +89,9 @@ docker run -d --name osrm_foot -p 5001:5000 -v "${PWD}/osrm_data/foot:/data" osr
 
 ### 3. Start the OpenTripPlanner Container
 
-The OTP container requires the `otp-data` folder, which contains the GTFS feeds for OSY (buses) and STASY (metro/tram), along with the OpenStreetMap data. When it boots up, it will build a graph in memory.
+The OTP container requires the `osrm_data/otp-data` folder, which contains the GTFS feeds for OSY (buses) and STASY (metro/tram), along with the OpenStreetMap data. When it boots up, it will build a graph in memory.
 ```bash
-docker run -d -p 8080:8080 --name otp -v "${PWD}/otp-data:/var/otp" docker.io/opentripplanner/opentripplanner:latest --load --serve /var/otp
+docker run -d -p 8080:8080 --name otp -v "${PWD}/osrm_data/otp-data:/var/opentripplanner" docker.io/opentripplanner/opentripplanner:latest --load --serve
 ```
 
 > **Note**: On Linux/macOS, replace `${PWD}` with `$(pwd)`.

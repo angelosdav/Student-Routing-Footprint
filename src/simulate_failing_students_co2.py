@@ -110,7 +110,7 @@ def fetch_otp_transit_routes(lat1, lon1, lat2, lon2, date_str, time_str):
     }}
     """
     try:
-        res = requests.post(url, json={'query': query}, timeout=10.0)
+        res = requests.post(url, json={'query': query}, timeout=25.0)
         if res.status_code == 200:
             data = res.json()
             if 'data' in data and data['data'].get('plan'):

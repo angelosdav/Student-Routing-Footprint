@@ -44,6 +44,25 @@ $$P(i) = \frac{e^{-\theta \cdot C_i}}{\sum_k e^{-\theta \cdot C_k}}$$
 - 🚇 **Metro**: 3.1
 - 🚶 **Walking**: 0.0
 
+## Simulation Pipeline
+
+The Monte Carlo simulation (`src/simulate_failing_students_co2.py`) processes the dataset following this step-by-step stochastic workflow for each student:
+
+1. **Data Ingestion**: Reads the student's origin postal code and maps it to coordinates.
+2. **Route Generation**: 
+   - Queries local OSRM engines for Car and Walking route distances and durations.
+   - Queries OpenTripPlanner for actual Transit itineraries (Metro + Bus, Direct Bus).
+   - *Fallback*: Automatically uses Haversine straight-line distance approximations if Docker engines are offline.
+3. **Cost Calculation**: Computes the generalized cost for all available modes based on travel time, wait time, parking penalties, and alternative-specific constants (ASC).
+4. **Outbound Leg (Peak Hours)**: 
+   - Uses the Multinomial Logit Model to calculate mode selection probabilities.
+   - For car users, applies contextual roles (Driver, Carpool, Drop-off) to adjust CO₂ multipliers.
+5. **Inbound Leg (Off-Peak)**: 
+   - Incorporates a "convenience bias" (80% chance to stick with the outbound transit/walking mode).
+   - Dynamically calculates return lift probabilities (carpools and pick-ups) based on distance.
+6. **Stochastic Delays**: Introduces randomness via exponential distributions to simulate real-world traffic incidents, bus tardiness, and metro delays.
+7. **Emissions Aggregation**: Sums the CO₂eq for both legs using mode-specific emission factors and outputs an aggregated environmental footprint report.
+
 ## Tech Stack
 
 | Layer | Technologies |

@@ -9,7 +9,7 @@ import concurrent.futures
 # Base configuration
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 POSTCODES_PATH = os.path.join(BASE_DIR, 'data', 'postcodes_attica.json')
-DATASET_PATH = os.path.join(BASE_DIR, 'data', 'students_exam_dataset.csv')
+DATASET_PATH = os.path.join(BASE_DIR, 'data', 'synthetic_students.csv')
 
 # Load postcodes
 with open(POSTCODES_PATH, 'r', encoding='utf-8') as f:
@@ -454,8 +454,8 @@ def compute_student_route_and_co2(tk, is_peak=True, reverse=False, go_mode_id=No
         'is_driver': outbound_is_driver
     }
 
-def run_simulation(min_grade=0.0, max_grade=1.0, dataset_path=DATASET_PATH):
-    filtered_students = []
+def run_simulation(min_grade=0.0, max_grade=2.0, dataset_path=DATASET_PATH):
+    students_map = {}
     invalid_count = 0
 
     with open(dataset_path, 'r', encoding='utf-8-sig') as f:
@@ -469,117 +469,103 @@ def run_simulation(min_grade=0.0, max_grade=1.0, dataset_path=DATASET_PATH):
                 if min_grade <= grade_val <= max_grade:
                     clean_tk = tk.strip()
                     if clean_tk in local_postcodes:
-                        filtered_students.append({'tk': clean_tk, 'grade': grade_val, 'course': row['COURSE']})
+                        sid = row.get('STUDENT_ID', 'UNKNOWN')
+                        if sid not in students_map:
+                            students_map[sid] = {'tk': clean_tk, 'skill': row.get('SKILL', ''), 'courses': []}
+                        students_map[sid]['courses'].append({'course': row['COURSE'], 'grade': grade_val})
                     else:
                         invalid_count += 1
             except ValueError:
                 continue
 
     print(f"============================================================")
-    print(f"Filters: Found {len(filtered_students)} students with grade {min_grade} to {max_grade}")
+    print(f"Filters: Found {len(students_map)} unique students with failures in grade range {min_grade} to {max_grade}")
     if invalid_count > 0:
-        print(f"Excluded {invalid_count} students (postcode out of Attica or invalid)")
+        print(f"Excluded {invalid_count} exams (postcode out of Attica or invalid)")
     print(f"============================================================\n")
 
     print("Checking Docker APIs connectivity...")
-    # Do a quick test query to check if we are guessing or not
     test_osrm = fetch_osrm_route(5000, "driving", 37.9838, 23.7275, DEST_LAT, DEST_LON)
     test_otp = fetch_otp_transit_routes(37.9838, 23.7275, DEST_LAT, DEST_LON, "2026-07-22", "08:00")
     
-    is_guessing = False
     if test_osrm is None and (test_otp is None or len(test_otp) == 0):
-        print(" -> [WARNING] Both OSRM and OTP are offline! The simulation will GUESS all routes (Empirical Fallback).\n")
-        is_guessing = True
-    elif test_osrm is None:
-        print(" -> [WARNING] OSRM is offline! Car/Foot routes will be GUESSED. Transit will use Live OTP.\n")
-        is_guessing = True
-    elif test_otp is None or len(test_otp) == 0:
-        print(" -> [WARNING] OTP is offline! Transit routes will be GUESSED. Car/Foot will use Live OSRM.\n")
-        is_guessing = True
+        print(" -> [WARNING] Both OSRM and OTP are offline! The simulation will GUESS all routes.\n")
     else:
-        print(" -> [OK] Connected to local Docker OSRM and OTP successfully. Using LIVE data.\n")
+        print(" -> [OK] Connected to local Docker OSRM/OTP successfully.\n")
 
     total_co2_grams = 0.0
     mode_counts = {'transit1': 0, 'transit2': 0, 'car': 0, 'moto': 0, 'foot': 0}
     mode_co2    = {'transit1': 0, 'transit2': 0, 'car': 0, 'moto': 0, 'foot': 0}
-    valid_simulated = 0
+    total_trips = 0
 
     def process_student(args):
-        i, s = args
-        go_res = compute_student_route_and_co2(s['tk'], is_peak=True, reverse=False)
-        if not go_res:
-            return None
-            
-        ret_res = compute_student_route_and_co2(
-            s['tk'], 
-            is_peak=False, 
-            reverse=True, 
-            go_mode_id=go_res['chosen_mode_id'],
-            is_driver=go_res['is_driver']
-        )
-        if not ret_res:
-            return None
-            
-        return (i, s, go_res, ret_res)
+        sid, s_data = args
+        trips = []
+        for fail in s_data['courses']:
+            go_res = compute_student_route_and_co2(s_data['tk'], is_peak=True, reverse=False)
+            if not go_res:
+                continue
+            ret_res = compute_student_route_and_co2(
+                s_data['tk'], is_peak=False, reverse=True, 
+                go_mode_id=go_res['chosen_mode_id'], is_driver=go_res['is_driver']
+            )
+            if ret_res:
+                trips.append((fail, go_res, ret_res))
+        return sid, s_data, trips
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        results = executor.map(process_student, enumerate(filtered_students, 1))
+        results = executor.map(process_student, students_map.items())
         
         for res in results:
-            if not res:
-                continue
-                
-            i, s, go_res, ret_res = res
-
-            valid_simulated += 1
+            if not res: continue
+            sid, s_data, trips = res
+            if not trips: continue
             
-            # Go leg stats
-            go_id = go_res['chosen_mode_id']
-            go_name = go_res['chosen_mode_name']
-            go_co2 = go_res['chosen_co2_grams']
-            go_dur = go_res['chosen_dur_min']
+            student_total_co2 = 0
+            
+            print(f"[{sid}] (Postcode: {s_data['tk']} | Skill: {s_data['skill']}) - Failed {len(trips)} courses:")
+            
+            for trip in trips:
+                fail, go_res, ret_res = trip
+                total_trips += 1
+                
+                go_id = go_res['chosen_mode_id']
+                ret_id = ret_res['chosen_mode_id']
+                go_co2 = go_res['chosen_co2_grams']
+                ret_co2 = ret_res['chosen_co2_grams']
+                
+                student_total_co2 += (go_co2 + ret_co2)
+                total_co2_grams += (go_co2 + ret_co2)
+                
+                mode_counts[go_id] += 1
+                mode_counts[ret_id] += 1
+                mode_co2[go_id] += go_co2
+                mode_co2[ret_id] += ret_co2
+                
+                print(f"   -> {fail['course']} (Grade: {fail['grade']})")
+                print(f"      Outbound: {go_res['chosen_mode_name']:<24} | CO2: {go_co2:>4}g | Time: {go_res['chosen_dur_min']:>4.1f}m")
+                print(f"      Inbound:  {ret_res['chosen_mode_name']:<24} | CO2: {ret_co2:>4}g | Time: {ret_res['chosen_dur_min']:>4.1f}m")
+                
+            print(f"   === Total Footprint for {sid}: {student_total_co2} g CO2eq ===\n")
 
-            # Return leg stats
-            ret_id = ret_res['chosen_mode_id']
-            ret_name = ret_res['chosen_mode_name']
-            ret_co2 = ret_res['chosen_co2_grams']
-            ret_dur = ret_res['chosen_dur_min']
-
-            # Round trip stats
-            student_co2 = go_co2 + ret_co2
-            total_co2_grams += student_co2
-
-            mode_counts[go_id] += 1
-            mode_counts[ret_id] += 1
-            mode_co2[go_id] += go_co2
-            mode_co2[ret_id] += ret_co2
-
-            print(f"Student {i:02d} (Postcode {s['tk']} | Grade {s['grade']}):\n"
-                  f"   Outbound (Peak): {go_name:<26} | CO2: {go_co2:>3} g | Time: {go_dur:>4.1f} min (+{go_res.get('delay_min', 0):>4.1f}m delay)\n"
-                  f"   Inbound (Off Peak): {ret_name:<26} | CO2: {ret_co2:>3} g | Time: {ret_dur:>4.1f} min (+{ret_res.get('delay_min', 0):>4.1f}m delay)\n"
-                  f"   Round Trip Footprint: {student_co2} g CO2eq\n")
-
-    print(f"\n============================================================")
-    print(f"CO2 Environmental Footprint Summary (Grades {min_grade} to {max_grade}) in Round Trip")
     print(f"============================================================")
-    print(f"Total students within grade range:            {len(filtered_students)}")
-    print(f"Valid simulated student trips (Attica):       {valid_simulated}")
-    print(f"Excluded students (noise or invalid postcode): {invalid_count}")
+    print(f"CO2 Environmental Footprint Summary (Grades {min_grade} to {max_grade})")
+    print(f"============================================================")
+    print(f"Total students who failed at least 1 course:  {len(students_map)}")
+    print(f"Total simulated exam trips (Round Trips):     {total_trips}")
     print(f"============================================================")
     print(f"Total CO2 emissions (Round Trip):             {total_co2_grams:,.0f} g CO2eq ({total_co2_grams/1000:.2f} kg CO2)")
-    if valid_simulated > 0:
-        print(f"Average student footprint (Round Trip):       {total_co2_grams/valid_simulated:.1f} g CO2eq per student")
     print(f"============================================================")
-    print(f"Mode Choice Distribution (Monte Carlo Round Trip Legs):")
-    total_legs = valid_simulated * 2
+    print(f"Mode Choice Distribution (Legs):")
+    total_legs = total_trips * 2
     for m_id, name in [('transit1', 'Metro + Bus'), ('transit2', 'Direct Bus'), 
                       ('car', 'Car'), ('moto', 'Motorcycle'), ('foot', 'Walking')]:
         cnt = mode_counts[m_id]
         pct = (cnt / total_legs * 100) if total_legs > 0 else 0
         co2_sum = mode_co2[m_id]
-        print(f"   * {name:<24}: {cnt:>2} legs ({pct:>4.1f}%) | CO2: {co2_sum:>6} g")
+        print(f"   * {name:<24}: {cnt:>4} legs ({pct:>4.1f}%) | CO2: {co2_sum:>6} g")
     print(f"============================================================")
 
 if __name__ == '__main__':
-    # Run simulation for grades between 0.0 and 1.0
-    run_simulation(0.0, 1.0)
+    # Run simulation for grades between 0.0 and 2.0
+    run_simulation(0.0, 2.0)

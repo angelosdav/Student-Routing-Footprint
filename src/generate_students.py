@@ -26,25 +26,25 @@ def load_postcodes():
 
 def get_random_skill():
     """
-    Εκχωρεί ένα επίπεδο ικανότητας (skill) βάσει 5 διακριτών κατηγοριών.
-    - Αδιάφορος (-0.10): 20% πιθανότητα
-    - Αδιάφορος προς Μέτριος (-0.05): 25% πιθανότητα
-    - Μέτριος (0.0): 30% πιθανότητα (Η πλειοψηφία)
-    - Μέτριος προς Καλός (+0.05): 15% πιθανότητα
-    - Καλός (+0.10): 10% πιθανότητα
-    Σύνολο Αρνητικών: 45% | Σύνολο Θετικών: 25% (Άρα Left-Skewed)
+    Assigns a skill level based on 5 discrete categories.
+    - Apathetic (-0.10): 20% probability
+    - Below Average (-0.05): 25% probability
+    - Average (0.0): 30% probability (The majority / Mode)
+    - Above Average (+0.05): 15% probability
+    - Excellent (+0.10): 10% probability
+    Total Negative: 45% | Total Positive: 25% (Left-Skewed distribution)
     """
     categories = [-0.10, -0.05, 0.0, 0.05, 0.10]
     weights = [20, 25, 30, 15, 10]
     
-    # Επιλογή κατηγορίας βάσει των βαρών
+    # Pick category based on weights
     base_skill = random.choices(categories, weights=weights, k=1)[0]
     
-    # Προσθήκη ελάχιστου "θορύβου" (+/- 0.02) ώστε να μην έχουν όλοι ακριβώς το ίδιο δεκαδικό
+    # Add minimal uniform noise (+/- 0.02) so not everyone has the exact same decimal
     noise = random.uniform(-0.02, 0.02)
     final_skill = base_skill + noise
     
-    # Αυστηρό όριο
+    # Strict boundaries
     return max(-0.10, min(0.10, final_skill))
 
 def pick_grade_for_distribution(dist):

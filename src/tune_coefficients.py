@@ -2,8 +2,8 @@ import math
 
 def get_pass_rate(a, gamma=0.8):
     """
-    Δέχεται ένα 'a' (δυσκολία) και επιστρέφει το τελικό ποσοστό επιτυχίας (βαθμοί >= 5.0) 
-    αφού εφαρμόσει το μαθηματικό μοντέλο και τους κανόνες μας.
+    Accepts a difficulty coefficient 'a' and returns the final pass rate (grades >= 5.0) 
+    after applying the mathematical model and business rules.
     """
     grades = [x * 0.5 for x in range(21)]
     theoretical_grades = [x * 0.5 for x in range(21, 25)] if a > 0 else []
@@ -33,14 +33,14 @@ def get_pass_rate(a, gamma=0.8):
     if a > 0:
         final_p[10.0] += sum(base_p[x] for x in theoretical_grades)
         
-    # Επιστρέφει το άθροισμα των πιθανοτήτων για βαθμούς 5.0 και άνω
+    # Return the sum of probabilities for grades 5.0 and above
     return sum(p for g, p in final_p.items() if g >= 5.0) * 100
 
 
 def tune_courses():
     """
-    Δοκιμάζει χιλιάδες πιθανά 'a' για να βρει αυτό που πετυχαίνει ακριβώς 
-    το Target Pass Rate (το πραγματικό ποσοστό από τα δεδομένα).
+    Tests thousands of possible 'a' coefficients to find the one that perfectly
+    matches the Target Pass Rate (the empirical rate from the data).
     """
     targets = [
         ('ΔΙΟΙΚΗΤΙΚΗ ΛΟΓΙΣΤΙΚΗ', 25.8), 
@@ -51,31 +51,31 @@ def tune_courses():
         ('ΜΑΚΡΟΟΙΚΟΝΟΜΙΑ', 95.3)
     ]
 
-    print("Ξεκινάει το Auto-Tuning των Μαθημάτων...\n")
+    print("Starting Auto-Tuning of Courses...\n")
 
     for name, target_pass_rate in targets:
         best_a = 0
-        min_diff = 100 # Αρχικό τεράστιο σφάλμα
+        min_diff = 100 # Initial large error
         
-        # Ελέγχουμε όλες τις τιμές του 'a' από -1.00 έως +1.00 με βήμα 0.01
+        # Check all values of 'a' from -1.00 to +1.00 with a 0.01 step
         for i in range(-100, 100):
             test_a = i / 100.0
             
-            # Τι ποσοστό επιτυχίας βγάζει το μοντέλο μας με αυτό το test_a;
+            # What pass rate does this test_a produce?
             simulated_pass_rate = get_pass_rate(test_a)
             
-            # Πόσο απέχει από το πραγματικό νούμερο του Excel;
+            # How far is it from the empirical target?
             diff = abs(simulated_pass_rate - target_pass_rate)
             
-            # Αν είναι πιο κοντά, κράτα το ως το καλύτερο 'a'
+            # If closer, keep it as the best 'a'
             if diff < min_diff:
                 min_diff = diff
                 best_a = test_a
                 
         final_rate = get_pass_rate(best_a)
         print(f"{name}:")
-        print(f"  -> Ιδανικό 'a' βρέθηκε: {best_a}")
-        print(f"  -> Επίτευξη: {final_rate:.1f}% (Πραγματικό Στόχος: {target_pass_rate}%)\n")
+        print(f"  -> Ideal 'a' found: {best_a}")
+        print(f"  -> Achieved: {final_rate:.1f}% (Empirical Target: {target_pass_rate}%)\n")
 
 if __name__ == '__main__':
     tune_courses()

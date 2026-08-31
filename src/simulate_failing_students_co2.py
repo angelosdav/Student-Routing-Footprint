@@ -4,9 +4,13 @@ import math
 import random
 import os
 import requests
-import concurrent.futures
+import argparse
+import time
+from concurrent.futures import ThreadPoolExecutor
 
-# Base configuration
+# Import grade distribution and random choice functions from grade_model
+from grade_model import generate_course_distribution
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 POSTCODES_PATH = os.path.join(BASE_DIR, 'data', 'postcodes_attica.json')
 DATASET_PATH = os.path.join(BASE_DIR, 'data', 'synthetic_students.csv')
@@ -15,7 +19,7 @@ DATASET_PATH = os.path.join(BASE_DIR, 'data', 'synthetic_students.csv')
 with open(POSTCODES_PATH, 'r', encoding='utf-8') as f:
     local_postcodes = json.load(f)
 
-# Destination campus coordinates map
+# Destination campus coordinates
 UNIVERSITIES = {
     "UNIWA Egaleo": (37.9857, 23.6792),
     "EKPA Zografou": (37.9676, 23.7665),
@@ -41,10 +45,10 @@ UNIVERSITIES = {
     "Evelpidon": (37.8282, 23.7744)
 }
 
-TARGET_CAMPUS = "UNIWA Egaleo" # Change this to any key from the dictionary above!
+TARGET_CAMPUS = "UNIWA Egaleo"
 DEST_LAT, DEST_LON = UNIVERSITIES.get(TARGET_CAMPUS, (37.9857, 23.6792))
 
-# Emission factors in grams of CO2 per passenger kilometer
+# Emission factors in grams of CO2 per passenger-kilometer
 EF_CAR   = 120.0
 EF_MOTO  = 70.0
 EF_BUS   = 10.81
@@ -59,15 +63,26 @@ ASC_T2    = -2.0
 ASC_FOOT  = 0.0
 THETA     = 0.09
 
+# Course metadata: difficulty tiers and base coefficients
+COURSES_META = {
+    "ΔΙΟΙΚΗΤΙΚΗ ΛΟΓΙΣΤΙΚΗ": {"a": -0.32, "tier": "Hard"},
+    "ΣΤΑΤΙΣΤΙΚΗ ΕΠΙΧΕΙΡΗΣΕΩΝ": {"a": -0.14, "tier": "Hard"},
+    "ΜΙΚΡΟΟΙΚΟΝΟΜΙΑ": {"a": -0.08, "tier": "Medium"},
+    "ΕΙΣΑΓΩΓΗ ΣΤΟ ΔΙΚΑΙΟ": {"a": -0.02, "tier": "Medium"},
+    "ΠΛΗΡΟΦΟΡΙΑΚΑ ΣΥΣΤΗΜΑΤΑ ΔΙΟΙΚΗΣΗΣ": {"a": 0.15, "tier": "Easy"},
+    "ΜΑΚΡΟΟΙΚΟΝΟΜΙΑ": {"a": 0.33, "tier": "Easy"}
+}
+
+# In-memory routing cache to allow thousands of fast Monte Carlo iterations
+POSTCODE_CACHE = {}
+
 def pseudo_hash(s):
-    # Deterministic hash for vehicle access (repeatability)
     h = 0
     for char in s:
         h = (h * 31 + ord(char)) & 0xFFFFFFFF
     return h
 
 def fetch_osrm_route(port, profile, lat1, lon1, lat2, lon2):
-    # Call local routing engine
     url = f"http://localhost:{port}/route/v1/{profile}/{lon1},{lat1};{lon2},{lat2}"
     try:
         res = requests.get(url, params={"overview": "false"}, timeout=1.5)
@@ -83,7 +98,7 @@ def fetch_osrm_route(port, profile, lat1, lon1, lat2, lon2):
         pass
     return None
 
-def fetch_otp_transit_routes(lat1, lon1, lat2, lon2, date_str, time_str):
+def fetch_otp_transit_routes(lat1, lon1, lat2, lon2, date_str="2026-07-22", time_str="08:00"):
     url = 'http://localhost:8080/otp/routers/default/index/graphql'
     query = f"""
     {{
@@ -110,7 +125,7 @@ def fetch_otp_transit_routes(lat1, lon1, lat2, lon2, date_str, time_str):
     }}
     """
     try:
-        res = requests.post(url, json={'query': query}, timeout=25.0)
+        res = requests.post(url, json={'query': query}, timeout=15.0)
         if res.status_code == 200:
             data = res.json()
             if 'data' in data and data['data'].get('plan'):
@@ -127,17 +142,68 @@ def haversine_km(lat1, lon1, lat2, lon2):
     a = math.sin(dphi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2)**2
     return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-def compute_student_route_and_co2(tk, is_peak=True, reverse=False, go_mode_id=None, is_driver=False):
-    clean_tk = str(tk).strip()
-    if clean_tk not in local_postcodes:
+def preload_postcode_routes(postcodes_to_cache):
+    """Pre-calculates and caches the routing data for postcodes in parallel."""
+    print(f"Pre-caching routing network for {len(postcodes_to_cache)} distinct Attica postcodes...")
+    
+    def cache_single_tk(tk):
+        clean_tk = str(tk).strip()
+        if clean_tk not in local_postcodes:
+            return clean_tk, None
+        
+        coord = local_postcodes[clean_tk]
+        lat, lon = coord['lat'], coord['lon']
+        
+        # 1. Car route
+        osrm_car = fetch_osrm_route(5000, "driving", lat, lon, DEST_LAT, DEST_LON)
+        if not osrm_car:
+            d_hav = haversine_km(lat, lon, DEST_LAT, DEST_LON)
+            osrm_car = {'dist_km': d_hav * 1.35, 'dur_min': (d_hav * 1.35 / 35.0) * 60.0}
+            
+        # 2. Foot route
+        osrm_foot = fetch_osrm_route(5001, "foot", lat, lon, DEST_LAT, DEST_LON)
+        if not osrm_foot:
+            d_hav = haversine_km(lat, lon, DEST_LAT, DEST_LON)
+            osrm_foot = {'dist_km': d_hav * 1.25, 'dur_min': (d_hav * 1.25 / 4.8) * 60.0}
+            
+        # 3. Transit route
+        otp_itins = fetch_otp_transit_routes(lat, lon, DEST_LAT, DEST_LON)
+        
+        return clean_tk, {
+            'lat': lat,
+            'lon': lon,
+            'car': osrm_car,
+            'foot': osrm_foot,
+            'otp': otp_itins
+        }
+
+    start_t = time.time()
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        results = executor.map(cache_single_tk, postcodes_to_cache)
+        for tk, data in results:
+            if data:
+                POSTCODE_CACHE[tk] = data
+                
+    elapsed = time.time() - start_t
+    print(f" -> Successfully cached {len(POSTCODE_CACHE)} postcodes in {elapsed:.2f}s.\n")
+
+def compute_student_leg_fast(clean_tk, is_peak=True, reverse=False, go_mode_id=None, is_driver=False):
+    """Calculates one trip leg using in-memory cached routes and stochastic MNL logic."""
+    if clean_tk not in POSTCODE_CACHE:
         return None
 
-    coord = local_postcodes[clean_tk]
-    lat, lon = coord['lat'], coord['lon']
-
-    # Vehicle availability constraints
-    h = pseudo_hash(clean_tk)
+    cached = POSTCODE_CACHE[clean_tk]
+    osrm_car = cached['car']
+    osrm_foot = cached['foot']
+    otp_itins = cached['otp']
     
+    car_dist_km = osrm_car['dist_km']
+    car_dur_min = osrm_car['dur_min'] * (1.35 if is_peak else 1.0)
+    
+    foot_dist_km = osrm_foot['dist_km']
+    foot_dur_min = osrm_foot['dur_min']
+
+    h = pseudo_hash(clean_tk)
     if go_mode_id in ['transit1', 'transit2', 'foot']:
         has_car = False
         has_moto = False
@@ -145,270 +211,121 @@ def compute_student_route_and_co2(tk, is_peak=True, reverse=False, go_mode_id=No
         has_car = (h % 100 < 20)
         has_moto = ((h >> 2) % 100 < 15)
 
-    # Route options
-    if not reverse:
-        osrm_car  = fetch_osrm_route(5000, "driving", lat, lon, DEST_LAT, DEST_LON)
-        osrm_foot = fetch_osrm_route(5001, "walking", lat, lon, DEST_LAT, DEST_LON)
-    else:
-        osrm_car  = fetch_osrm_route(5000, "driving", DEST_LAT, DEST_LON, lat, lon)
-        osrm_foot = fetch_osrm_route(5001, "walking", DEST_LAT, DEST_LON, lat, lon)
+    # Inbound Convenience Bias
+    if reverse and go_mode_id:
+        p_stay = 0.80
+        p_lift_carpool = max(0.0, 0.20 - (0.005 * car_dist_km))
+        p_lift_pickup  = max(0.0, 0.08 - (0.007 * car_dist_km))
+        total_lift_p = p_lift_carpool + p_lift_pickup
 
-    # Fallback to straight line distance if engine fails
-    straight_km = haversine_km(lat, lon, DEST_LAT, DEST_LON)
-    car_dist_km  = osrm_car['dist_km'] if osrm_car else (straight_km * 1.25)
-    raw_car_min  = osrm_car['dur_min'] if osrm_car else max(4.0, car_dist_km * 2.8)
-    car_multiplier = 1.45 if is_peak else 1.0
-    speed_correction = max(0.60, 1.0 - 0.015 * car_dist_km)
-    car_dur_min  = raw_car_min * car_multiplier * speed_correction
+        if go_mode_id in ['transit1', 'transit2', 'foot']:
+            if random.random() < (1.0 - p_stay):
+                if random.random() < (p_lift_pickup / (total_lift_p + 1e-6)):
+                    return {
+                        'mode_id': 'car',
+                        'mode_name': 'Car [Pick-up]',
+                        'co2_grams': round(car_dist_km * EF_CAR * 2.0),
+                        'dur_min': round(car_dur_min, 1),
+                        'dist_km': round(car_dist_km, 2),
+                        'is_driver': False
+                    }
+                else:
+                    return {
+                        'mode_id': 'car',
+                        'mode_name': 'Car [Carpool]',
+                        'co2_grams': round(car_dist_km * EF_CAR * 0.5),
+                        'dur_min': round(car_dur_min, 1),
+                        'dist_km': round(car_dist_km, 2),
+                        'is_driver': False
+                    }
+
+    modes = []
     
-    foot_dist_km = osrm_foot['dist_km'] if osrm_foot else (straight_km * 1.15)
-    foot_dur_min = (osrm_foot['dur_min'] * 1.15) if osrm_foot else max(3.0, foot_dist_km * 13.0)
+    # Mode 1: Car
+    if has_car or (reverse and not go_mode_id):
+        cost_car = car_dur_min + 5.0 + ASC_CAR
+        co2_car = car_dist_km * EF_CAR
+        modes.append(('car', 'Car', cost_car, co2_car, car_dur_min, 'road'))
 
-    # Query OpenTripPlanner for real transit itineraries
-    date_str = "2026-07-22"
-    time_str = "08:00" if is_peak else "14:00"
-    
-    otp_itineraries = []
-    if not reverse:
-        otp_itineraries = fetch_otp_transit_routes(lat, lon, DEST_LAT, DEST_LON, date_str, time_str)
-    else:
-        otp_itineraries = fetch_otp_transit_routes(DEST_LAT, DEST_LON, lat, lon, date_str, time_str)
+    # Mode 2: Moto
+    if has_moto or (reverse and not go_mode_id):
+        dur_moto = car_dur_min * 0.8
+        cost_moto = dur_moto + 2.0 + ASC_MOTO
+        co2_moto = car_dist_km * EF_MOTO
+        modes.append(('moto', 'Motorcycle', cost_moto, co2_moto, dur_moto, 'road'))
 
-    otp_online = otp_itineraries is not None
-    if otp_itineraries is None:
-        otp_itineraries = []
-
-    # Parse OTP results to find transit1 (Metro + Bus) and transit2 (Direct Bus)
-    t1_otp = None
-    t2_otp = None
-    
-    for itin in otp_itineraries:
-        legs = itin.get('legs', [])
-        has_metro = any(leg['mode'] in ('SUBWAY', 'TRAM', 'RAIL') for leg in legs)
-        has_bus = any(leg['mode'] == 'BUS' for leg in legs)
-        
-        # Calculate emissions
-        co2_g = 0.0
-        for leg in legs:
-            dist_km = leg['distance'] / 1000.0
-            if leg['mode'] == 'BUS':
-                co2_g += dist_km * EF_BUS
-            elif leg['mode'] in ('SUBWAY', 'TRAM', 'RAIL'):
-                co2_g += dist_km * EF_METRO
-        
-        dur_min = itin['duration'] / 60.0
-        wait_min = itin['waitingTime'] / 60.0
-        walk_min = itin['walkTime'] / 60.0
-        in_vehicle_min = max(0.0, dur_min - wait_min - walk_min)
-        
-        if has_metro: # Metro + Bus or Metro only
-            if t1_otp is None or dur_min < t1_otp['dur']:
-                t1_otp = {'dur': dur_min, 'wait': wait_min, 'walk': walk_min, 'in_vehicle': in_vehicle_min, 'co2': co2_g}
-        elif has_bus: # Direct Bus only
-            if t2_otp is None or dur_min < t2_otp['dur']:
-                t2_otp = {'dur': dur_min, 'wait': wait_min, 'walk': walk_min, 'in_vehicle': in_vehicle_min, 'co2': co2_g}
-
-    # Fallback parameters if OTP fails to find routes
-    bus_dist_km  = straight_km * 1.15
-    moto_dist_km = car_dist_km
-    moto_dur_min = car_dur_min * 0.90
-
-    # Wait and travel times defaults
-    metro_wait_def = 4.0 if is_peak else 6.0
-    bus_wait_def   = 7.0 if is_peak else 11.0
-
-    # Transit 1 (Metro + Express Bus)
-    if t1_otp:
-        t1_total_dur = t1_otp['dur']
-        t1_wait = t1_otp['wait']
-        t1_walk = t1_otp['walk']
-        t1_in_metro = t1_otp['in_vehicle'] * 0.5
-        t1_in_bus = t1_otp['in_vehicle'] * 0.5
-        t1_co2_grams = round(t1_otp['co2'])
-    elif not otp_online:
-        t1_in_metro  = max(3.0, straight_km * 1.5)
-        t1_in_bus    = max(4.0, straight_km * 1.8)
-        t1_wait      = metro_wait_def + bus_wait_def
-        t1_walk      = 7.0
-        t1_total_dur = t1_walk + t1_wait + t1_in_metro + t1_in_bus
-        t1_co2_grams = round((bus_dist_km * 0.45 * EF_METRO) + (bus_dist_km * 0.55 * EF_BUS))
-    else:
-        t1_in_metro = 9999
-        t1_in_bus = 9999
-        t1_wait = 9999
-        t1_walk = 9999
-        t1_total_dur = 9999
-        t1_co2_grams = 0
-
-    # Transit 2 (Direct Bus)
-    if t2_otp:
-        t2_total_dur = t2_otp['dur']
-        t2_wait = t2_otp['wait']
-        t2_walk = t2_otp['walk']
-        t2_in_bus = t2_otp['in_vehicle']
-        t2_co2_grams = round(t2_otp['co2'])
-    elif not otp_online:
-        t2_in_bus    = max(8.0, straight_km * 3.1)
-        t2_wait      = 9.0 if is_peak else 14.0
-        t2_walk      = 9.0
-        t2_total_dur = t2_walk + t2_wait + t2_in_bus
-        t2_co2_grams = round(bus_dist_km * EF_BUS)
-    else:
-        t2_in_bus = 9999
-        t2_wait = 9999
-        t2_walk = 9999
-        t2_total_dur = 9999
-        t2_co2_grams = 0
-
-    car_co2_grams  = round(car_dist_km * EF_CAR)
-    moto_co2_grams = round(car_dist_km * EF_MOTO)
-    foot_co2_grams = 0.0
-
-    # Mode cost parameters
-    parking_car  = 4.0 if not reverse else 0.0
-    parking_moto = 1.0 if not reverse else 0.0
-    
-    C_car  = (car_dur_min + parking_car) + ((car_dist_km ** 0.85) * 0.35 * 5) + ASC_CAR
-    # Added (car_dist_km * 0.8) as a fatigue/discomfort penalty for riding a motorcycle over long distances
-    C_moto = (moto_dur_min + parking_moto) + ((car_dist_km ** 0.85) * 0.18 * 5) + (car_dist_km * 0.8) + ASC_MOTO
-    C_t1   = (t1_in_metro + t1_in_bus + t1_walk) + (1.2 * t1_wait) + 4.0 + ASC_T1 if t1_total_dur < 9999 else 999999
-    C_t2   = (t2_in_bus + t2_walk) + (1.2 * t2_wait) + ASC_T2 if t2_total_dur < 9999 else 999999
-    C_foot = foot_dur_min * 1.1 + ASC_FOOT
-
-    # Walk bias logic
-    if foot_dist_km <= 0.6:
-        foot_bias = -30.0
-    elif foot_dist_km <= 1.0:
-        foot_bias = -12.0
-    elif foot_dist_km <= 1.5:
-        foot_bias = 0.0
-    else:
-        foot_bias = 30.0
-
-    C_foot_adj = C_foot + foot_bias
-
-    # Mode probabilities
-    if go_mode_id in ['car', 'moto'] and is_driver:
-        exp_car  = 1.0 if go_mode_id == 'car' else 0.0
-        exp_moto = 1.0 if go_mode_id == 'moto' else 0.0
-        exp_t1   = 0.0
-        exp_t2   = 0.0
-        exp_foot = 0.0
-    else:
-        is_convenience_return = False
-        if reverse and go_mode_id not in ['car', 'moto']:
-            # 80% chance to stick to the same transit/foot mode due to convenience
-            if random.random() < 0.80:
-                is_convenience_return = True
-
-        if is_convenience_return:
-            exp_car  = 0.0
-            exp_moto = 0.0
-            exp_t1   = 1.0 if go_mode_id == 'transit1' else 0.0
-            exp_t2   = 1.0 if go_mode_id == 'transit2' else 0.0
-            exp_foot = 1.0 if go_mode_id == 'foot' else 0.0
-        else:
-            exp_car  = math.exp(-THETA * C_car) if (has_car and not reverse) else 0.0
-            exp_moto = math.exp(-THETA * C_moto) if (has_moto and not reverse) else 0.0
-            exp_t1   = math.exp(-THETA * C_t1)
-            exp_t2   = math.exp(-THETA * C_t2)
-            exp_foot = math.exp(-THETA * C_foot_adj)
+    # Modes 3 & 4: Public Transit
+    if otp_itins and len(otp_itins) > 0:
+        for idx, itin in enumerate(otp_itins[:2]):
+            t_id = f"transit{idx+1}"
+            dur = itin['duration'] / 60.0
+            wait = itin.get('waitingTime', 0) / 60.0
+            walk = itin.get('walkTime', 0) / 60.0
             
-            # Inbound Lift Probabilities (If they don't have a personal car parked at campus)
-            if reverse:
-                p_inbound_carpool = max(0.0, 0.20 - (0.005 * car_dist_km))
-                p_inbound_pickup  = max(0.0, 0.08 - (0.007 * car_dist_km))
-                p_total_lift = p_inbound_carpool + p_inbound_pickup
-                
-                if p_total_lift > 0 and random.random() < p_total_lift:
-                    exp_car = 1.0
-                    exp_moto = 0.0
-                    exp_t1 = 0.0; exp_t2 = 0.0; exp_foot = 0.0
+            legs = itin.get('legs', [])
+            num_transfers = max(0, sum(1 for leg in legs if leg.get('transitLeg')) - 1)
+            
+            c_co2 = 0.0
+            has_rail = False
+            for leg in legs:
+                d_km = leg.get('distance', 0) / 1000.0
+                m = leg.get('mode', '').upper()
+                if m in ['SUBWAY', 'METRO', 'TRAM', 'RAIL']:
+                    c_co2 += d_km * EF_METRO
+                    has_rail = True
+                elif m == 'BUS':
+                    c_co2 += d_km * EF_BUS
+            
+            asc = ASC_T1 if has_rail else ASC_T2
+            penalty_transfer = num_transfers * (10.0 if not is_peak else 6.0)
+            cost_t = (dur - wait - walk) + 1.2 * wait + 1.5 * walk + penalty_transfer + asc
+            t_name = "Metro + Bus" if has_rail else "Direct Bus"
+            modes.append((t_id, t_name, cost_t, c_co2, dur, 'transit'))
+    else:
+        # Fallback Transit
+        d_transit = car_dist_km * 1.25
+        dur_t1 = (d_transit / 25.0) * 60.0 + 8.0
+        cost_t1 = dur_t1 + 1.2 * 5.0 + 1.5 * 5.0 + 8.0 + ASC_T1
+        co2_t1 = (d_transit * 0.7 * EF_METRO) + (d_transit * 0.3 * EF_BUS)
+        modes.append(('transit1', 'Metro + Bus', cost_t1, co2_t1, dur_t1, 'transit'))
 
-    sum_exp  = exp_car + exp_moto + exp_t1 + exp_t2 + exp_foot
+    # Mode 5: Walking
+    if foot_dist_km <= 3.5:
+        cost_foot = foot_dur_min * 1.5 + ASC_FOOT
+        modes.append(('foot', 'Walking', cost_foot, 0.0, foot_dur_min, 'walk'))
 
-    p_car  = exp_car / sum_exp
-    p_moto = exp_moto / sum_exp
-    p_t1   = exp_t1 / sum_exp
-    p_t2   = exp_t2 / sum_exp
-    p_foot = exp_foot / sum_exp
+    # Multinomial Logit Choice Probability
+    min_cost = min(m[2] for m in modes)
+    exp_utils = [math.exp(-THETA * (m[2] - min_cost)) for m in modes]
+    sum_exp = sum(exp_utils)
+    probs = [u / sum_exp for u in exp_utils]
 
-    total_p = p_car + p_moto + p_t1 + p_t2 + p_foot
-    p_car  /= total_p
-    p_moto /= total_p
-    p_t1   /= total_p
-    p_t2   /= total_p
-    p_foot /= total_p
-
-    # Mode selection
-    modes = [
-        ('transit1', 'Metro + Express Bus', p_t1, t1_co2_grams, t1_total_dur),
-        ('transit2', 'Direct Bus',          p_t2, t2_co2_grams, t2_total_dur),
-        ('car',      'Car',                 p_car, car_co2_grams, car_dur_min),
-        ('moto',     'Motorcycle',          p_moto, moto_co2_grams, moto_dur_min),
-        ('foot',     'Walking',             p_foot, foot_co2_grams, foot_dur_min)
-    ]
-
-    r = random.random()
-    cumulative = 0.0
-    chosen_mode = modes[0]
-
-    for mode in modes:
-        cumulative += mode[2]
-        if r <= cumulative:
-            chosen_mode = mode
+    # Weighted random selection
+    rand_val = random.random()
+    cum = 0.0
+    chosen_idx = 0
+    for i, p in enumerate(probs):
+        cum += p
+        if rand_val <= cum:
+            chosen_idx = i
             break
 
-    # Dynamic Luck/Error simulation per trip leg
-    p_traffic_incident = 0.40 if is_peak else 0.15
-    max_traffic_delay = 25.0
-    
-    max_bus_wait_delay = 12.0 if is_peak else 25.0
-    p_bus_late = 0.30 if is_peak else 0.15
-    
-    error_car = 0.0
-    error_bus_wait = 0.0
-    error_metro = 0.0
-    
-    # 1. Traffic Error
-    if random.random() < p_traffic_incident:
-        error_car = min(random.expovariate(1.0 / 10.0), max_traffic_delay)
-    else:
-        error_car = min(random.expovariate(1.0 / 2.0), 5.0)
-        
-    # 2. Bus Wait Error
-    if random.random() < p_bus_late:
-        error_bus_wait = min(random.expovariate(1.0 / (max_bus_wait_delay / 2.0)), max_bus_wait_delay)
-    
-    # 3. Metro Error
-    if random.random() < 0.02:
-        error_metro = min(random.expovariate(1.0 / 5.0), 10.0)
-
+    chosen_mode = modes[chosen_idx]
     chosen_id = chosen_mode[0]
     base_dur = chosen_mode[4]
-    total_error = 0.0
-    
-    if chosen_id == 'car':
-        total_error = error_car
-    elif chosen_id == 'moto':
-        total_error = error_car * 0.30
-    elif chosen_id == 'transit1':
-        total_error = error_bus_wait + error_car + error_metro
-    elif chosen_id == 'transit2':
-        total_error = error_bus_wait + error_car
-    
-    final_dur_min = base_dur + total_error
-    
+
+    # Stochastic Delay Error
+    delay_error = random.expovariate(1.0 / (4.5 if is_peak else 2.5))
+    final_dur_min = base_dur + delay_error
+
     # Context CO2 logic (Driver, Drop-off, Carpool)
     co2_multiplier = 1.0
     outbound_is_driver = False
     context_name = ""
-    
+
     if not reverse and chosen_id in ['car', 'moto']:
-        base_p_carpool = 0.25
-        base_p_dropoff = 0.15
-        p_carpool = max(0.0, base_p_carpool - (0.005 * car_dist_km))
-        p_dropoff = max(0.0, base_p_dropoff - (0.007 * car_dist_km))
+        p_carpool = max(0.0, 0.25 - (0.005 * car_dist_km))
+        p_dropoff = max(0.0, 0.15 - (0.007 * car_dist_km))
         p_driver = 1.0 - p_carpool - p_dropoff
         
         rand_context = random.random()
@@ -417,11 +334,9 @@ def compute_student_route_and_co2(tk, is_peak=True, reverse=False, go_mode_id=No
             co2_multiplier = 1.0
             context_name = "Driver"
         elif rand_context < (p_driver + p_dropoff):
-            outbound_is_driver = False
             co2_multiplier = 2.0
             context_name = "Drop-off"
         else:
-            outbound_is_driver = False
             co2_multiplier = 0.5
             context_name = "Carpool"
             
@@ -430,142 +345,379 @@ def compute_student_route_and_co2(tk, is_peak=True, reverse=False, go_mode_id=No
         p_inbound_pickup  = max(0.0, 0.08 - (0.007 * car_dist_km))
         p_total_lift = p_inbound_carpool + p_inbound_pickup
         
-        if p_total_lift <= 0:
-            co2_multiplier = 0.5
-            context_name = "Carpool"
-        elif random.random() < (p_inbound_carpool / p_total_lift):
+        if p_total_lift <= 0 or random.random() < (p_inbound_carpool / p_total_lift):
             co2_multiplier = 0.5
             context_name = "Carpool"
         else:
             co2_multiplier = 2.0
             context_name = "Pick-up"
-            
+
     final_co2 = chosen_mode[3] * co2_multiplier
 
     return {
-        'tk': clean_tk,
+        'mode_id': chosen_id,
+        'mode_name': chosen_mode[1] + (f" [{context_name}]" if context_name else ""),
+        'co2_grams': round(final_co2),
+        'dur_min': round(final_dur_min, 1),
         'dist_km': round(car_dist_km, 2),
-        'probabilities': {m[0]: round(m[2]*100, 1) for m in modes},
-        'chosen_mode_id': chosen_mode[0],
-        'chosen_mode_name': chosen_mode[1] + (f" [{context_name}]" if context_name else ""),
-        'chosen_co2_grams': round(final_co2),
-        'chosen_dur_min': round(final_dur_min, 1),
-        'delay_min': round(total_error, 1),
         'is_driver': outbound_is_driver
     }
 
-def run_simulation(min_grade=0.0, max_grade=2.0, dataset_path=DATASET_PATH):
-    students_map = {}
-    invalid_count = 0
+def classify_skill(skill_val):
+    """Categorizes numeric student skill into the 5 discrete archetypes."""
+    val = float(skill_val)
+    if val <= -0.075:
+        return "Apathetic (-0.10)"
+    elif val <= -0.025:
+        return "Below Average (-0.05)"
+    elif val <= 0.025:
+        return "Average (0.00)"
+    elif val <= 0.075:
+        return "Above Average (+0.05)"
+    else:
+        return "Excellent (+0.10)"
 
+def load_failing_students(min_grade=0.0, max_grade=2.0, dataset_path=DATASET_PATH):
+    """Reads synthetic_students.csv and extracts students with severe failures."""
+    students_map = {}
     with open(dataset_path, 'r', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            grade_str = row['GRADE'].strip()
+            grade_val = float(row['GRADE'].strip())
             tk = row['TK_KATOIKIA'].strip()
+            
+            if min_grade <= grade_val <= max_grade and tk in local_postcodes:
+                sid = row.get('STUDENT_ID', 'UNKNOWN')
+                skill = float(row.get('SKILL', 0.0))
+                course = row['COURSE'].strip()
+                
+                if sid not in students_map:
+                    students_map[sid] = {
+                        'tk': tk,
+                        'skill': skill,
+                        'skill_class': classify_skill(skill),
+                        'failed_courses': []
+                    }
+                students_map[sid]['failed_courses'].append({
+                    'course': course,
+                    'initial_grade': grade_val,
+                    'tier': COURSES_META.get(course, {}).get('tier', 'Medium'),
+                    'base_a': COURSES_META.get(course, {}).get('a', 0.0)
+                })
+    return students_map
 
-            try:
-                grade_val = float(grade_str)
-                if min_grade <= grade_val <= max_grade:
-                    clean_tk = tk.strip()
-                    if clean_tk in local_postcodes:
-                        sid = row.get('STUDENT_ID', 'UNKNOWN')
-                        if sid not in students_map:
-                            students_map[sid] = {'tk': clean_tk, 'skill': row.get('SKILL', ''), 'courses': []}
-                        students_map[sid]['courses'].append({'course': row['COURSE'], 'grade': grade_val})
-                    else:
-                        invalid_count += 1
-            except ValueError:
-                continue
-
-    print(f"============================================================")
-    print(f"Filters: Found {len(students_map)} unique students with failures in grade range {min_grade} to {max_grade}")
-    if invalid_count > 0:
-        print(f"Excluded {invalid_count} exams (postcode out of Attica or invalid)")
-    print(f"============================================================\n")
-
-    print("Checking Docker APIs connectivity...")
-    test_osrm = fetch_osrm_route(5000, "driving", 37.9838, 23.7275, DEST_LAT, DEST_LON)
-    test_otp = fetch_otp_transit_routes(37.9838, 23.7275, DEST_LAT, DEST_LON, "2026-07-22", "08:00")
-    
-    if test_osrm is None and (test_otp is None or len(test_otp) == 0):
-        print(" -> [WARNING] Both OSRM and OTP are offline! The simulation will GUESS all routes.\n")
-    else:
-        print(" -> [OK] Connected to local Docker OSRM/OTP successfully.\n")
-
+def run_single_simulation(students_map, max_retakes=6, learning_rate=0.05):
+    """
+    Executes one complete Monte Carlo simulation run with the Retake Loop.
+    Returns aggregated metrics for this iteration.
+    """
     total_co2_grams = 0.0
+    total_round_trips = 0
     mode_counts = {'transit1': 0, 'transit2': 0, 'car': 0, 'moto': 0, 'foot': 0}
-    mode_co2    = {'transit1': 0, 'transit2': 0, 'car': 0, 'moto': 0, 'foot': 0}
-    total_trips = 0
+    
+    tier_stats = {
+        'Hard': {'attempts': 0, 'co2': 0.0, 'courses_count': 0},
+        'Medium': {'attempts': 0, 'co2': 0.0, 'courses_count': 0},
+        'Easy': {'attempts': 0, 'co2': 0.0, 'courses_count': 0}
+    }
+    
+    skill_stats = {
+        "Apathetic (-0.10)": {'students': 0, 'co2': 0.0, 'attempts': 0, 'failed_courses': 0},
+        "Below Average (-0.05)": {'students': 0, 'co2': 0.0, 'attempts': 0, 'failed_courses': 0},
+        "Average (0.00)": {'students': 0, 'co2': 0.0, 'attempts': 0, 'failed_courses': 0},
+        "Above Average (+0.05)": {'students': 0, 'co2': 0.0, 'attempts': 0, 'failed_courses': 0},
+        "Excellent (+0.10)": {'students': 0, 'co2': 0.0, 'attempts': 0, 'failed_courses': 0}
+    }
+    
+    # Track unique students per skill class
+    for s_info in students_map.values():
+        s_class = s_info['skill_class']
+        skill_stats[s_class]['students'] += 1
 
-    def process_student(args):
-        sid, s_data = args
-        trips = []
-        for fail in s_data['courses']:
-            go_res = compute_student_route_and_co2(s_data['tk'], is_peak=True, reverse=False)
-            if not go_res:
-                continue
-            ret_res = compute_student_route_and_co2(
-                s_data['tk'], is_peak=False, reverse=True, 
-                go_mode_id=go_res['chosen_mode_id'], is_driver=go_res['is_driver']
-            )
-            if ret_res:
-                trips.append((fail, go_res, ret_res))
-        return sid, s_data, trips
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        results = executor.map(process_student, students_map.items())
+    for sid, s_info in students_map.items():
+        tk = s_info['tk']
+        skill = s_info['skill']
+        s_class = s_info['skill_class']
         
-        for res in results:
-            if not res: continue
-            sid, s_data, trips = res
-            if not trips: continue
-            
-            student_total_co2 = 0
-            
-            print(f"[{sid}] (Postcode: {s_data['tk']} | Skill: {s_data['skill']}) - Failed {len(trips)} courses:")
-            
-            for trip in trips:
-                fail, go_res, ret_res = trip
-                total_trips += 1
-                
-                go_id = go_res['chosen_mode_id']
-                ret_id = ret_res['chosen_mode_id']
-                go_co2 = go_res['chosen_co2_grams']
-                ret_co2 = ret_res['chosen_co2_grams']
-                
-                student_total_co2 += (go_co2 + ret_co2)
-                total_co2_grams += (go_co2 + ret_co2)
-                
-                mode_counts[go_id] += 1
-                mode_counts[ret_id] += 1
-                mode_co2[go_id] += go_co2
-                mode_co2[ret_id] += ret_co2
-                
-                print(f"   -> {fail['course']} (Grade: {fail['grade']})")
-                print(f"      Outbound: {go_res['chosen_mode_name']:<24} | CO2: {go_co2:>4}g | Time: {go_res['chosen_dur_min']:>4.1f}m")
-                print(f"      Inbound:  {ret_res['chosen_mode_name']:<24} | CO2: {ret_co2:>4}g | Time: {ret_res['chosen_dur_min']:>4.1f}m")
-                
-            print(f"   === Total Footprint for {sid}: {student_total_co2} g CO2eq ===\n")
+        student_co2 = 0.0
+        student_attempts = 0
 
-    print(f"============================================================")
-    print(f"CO2 Environmental Footprint Summary (Grades {min_grade} to {max_grade})")
-    print(f"============================================================")
-    print(f"Total students who failed at least 1 course:  {len(students_map)}")
-    print(f"Total simulated exam trips (Round Trips):     {total_trips}")
-    print(f"============================================================")
-    print(f"Total CO2 emissions (Round Trip):             {total_co2_grams:,.0f} g CO2eq ({total_co2_grams/1000:.2f} kg CO2)")
-    print(f"============================================================")
-    print(f"Mode Choice Distribution (Legs):")
-    total_legs = total_trips * 2
-    for m_id, name in [('transit1', 'Metro + Bus'), ('transit2', 'Direct Bus'), 
-                      ('car', 'Car'), ('moto', 'Motorcycle'), ('foot', 'Walking')]:
-        cnt = mode_counts[m_id]
+        for fail in s_info['failed_courses']:
+            course_name = fail['course']
+            tier = fail['tier']
+            base_a = fail['base_a']
+            
+            tier_stats[tier]['courses_count'] += 1
+            skill_stats[s_class]['failed_courses'] += 1
+            
+            # Retake loop for this course
+            attempts = 0
+            passed = False
+            
+            while attempts < max_retakes and not passed:
+                attempts += 1
+                student_attempts += 1
+                total_round_trips += 1
+                
+                # Outbound commute
+                go_res = compute_student_leg_fast(tk, is_peak=True, reverse=False)
+                if not go_res:
+                    continue
+                # Inbound commute
+                ret_res = compute_student_leg_fast(
+                    tk, is_peak=False, reverse=True, 
+                    go_mode_id=go_res['mode_id'], is_driver=go_res['is_driver']
+                )
+                if not ret_res:
+                    continue
+
+                trip_co2 = go_res['co2_grams'] + ret_res['co2_grams']
+                total_co2_grams += trip_co2
+                student_co2 += trip_co2
+                
+                tier_stats[tier]['co2'] += trip_co2
+                mode_counts[go_res['mode_id']] += 1
+                mode_counts[ret_res['mode_id']] += 1
+                
+                # Simulate the exam retake grade
+                # Experience/Preparation boost: Scales dynamically with the student's study archetype
+                # Apathetic barely studies (+0.02), while Excellent students prepare seriously (+0.18)
+                skill_learning_rates = {
+                    "Apathetic (-0.10)": 0.02,
+                    "Below Average (-0.05)": 0.04,
+                    "Average (0.00)": 0.06,
+                    "Above Average (+0.05)": 0.10,
+                    "Excellent (+0.10)": 0.18
+                }
+                boost_rate = skill_learning_rates.get(s_class, learning_rate)
+                # First retake also gets an immediate preparation boost for top students (they study seriously)
+                initial_prep_boost = 0.24 if skill > 0.075 else (0.12 if skill > 0.025 else (0.05 if skill > -0.025 else 0.0))
+                
+                effective_a = base_a + skill + initial_prep_boost + (attempts - 1) * boost_rate
+                dist = generate_course_distribution(effective_a)
+                
+                # Roll new grade
+                grades = list(dist.keys())
+                weights = list(dist.values())
+                new_grade = random.choices(grades, weights=weights, k=1)[0]
+                
+                if new_grade >= 5.0:
+                    passed = True
+
+            tier_stats[tier]['attempts'] += attempts
+
+        skill_stats[s_class]['co2'] += student_co2
+        skill_stats[s_class]['attempts'] += student_attempts
+
+    return {
+        'total_co2_kg': total_co2_grams / 1000.0,
+        'total_round_trips': total_round_trips,
+        'avg_co2_per_student_kg': (total_co2_grams / len(students_map) / 1000.0) if students_map else 0.0,
+        'mode_counts': mode_counts,
+        'tier_stats': tier_stats,
+        'skill_stats': skill_stats
+    }
+
+def calculate_distribution_stats(values):
+    """Calculates comprehensive statistical indicators for a list of numbers."""
+    if not values:
+        return {}
+    
+    n = len(values)
+    sorted_v = sorted(values)
+    mean_val = sum(values) / n
+    variance = sum((x - mean_val)**2 for x in values) / (n - 1) if n > 1 else 0.0
+    std_dev = math.sqrt(variance)
+    
+    def percentile(p):
+        idx = int(p * (n - 1))
+        return sorted_v[idx]
+    
+    p5  = percentile(0.05)
+    p25 = percentile(0.25)
+    median = percentile(0.50)
+    p75 = percentile(0.75)
+    p95 = percentile(0.95)
+    iqr = p75 - p25
+    
+    # 95% Confidence Interval for the Mean
+    margin_of_error = 1.96 * (std_dev / math.sqrt(n)) if n > 0 else 0.0
+    ci_lower = mean_val - margin_of_error
+    ci_upper = mean_val + margin_of_error
+    
+    return {
+        'mean': mean_val,
+        'std': std_dev,
+        'median': median,
+        'min': sorted_v[0],
+        'max': sorted_v[-1],
+        'p5': p5,
+        'p25': p25,
+        'p75': p75,
+        'p95': p95,
+        'iqr': iqr,
+        'ci95': (ci_lower, ci_upper)
+    }
+
+def run_monte_carlo_experiments(num_runs=1000, min_grade=0.0, max_grade=2.0, max_retakes=6, learning_rate=0.05):
+    """Executes N Monte Carlo iterations and displays comprehensive statistical summaries."""
+    print("=" * 70)
+    print(f"  MONTE CARLO MOBILITY & CO2 SIMULATION ENGINE ({num_runs:,} ITERATIONS)")
+    print(f"  Target Campus: {TARGET_CAMPUS} | Grade Filter: [{min_grade} - {max_grade}]")
+    print(f"  Retake Mechanism: Max {max_retakes} attempts | Learning Boost: +{learning_rate} 'a'/attempt")
+    print("=" * 70 + "\n")
+
+    # Load dataset
+    students_map = load_failing_students(min_grade, max_grade)
+    if not students_map:
+        print("Error: No failing students found matching the criteria!")
+        return
+
+    print(f"Loaded {len(students_map)} unique failing students from dataset.")
+    distinct_postcodes = list({s['tk'] for s in students_map.values()})
+    
+    # Pre-cache all routes
+    preload_postcode_routes(distinct_postcodes)
+
+    print(f"Executing {num_runs:,} Monte Carlo simulation runs in memory...")
+    start_sim_time = time.time()
+    
+    sim_co2_kg = []
+    sim_avg_student_co2_kg = []
+    sim_trips = []
+    
+    global_mode_counts = {'transit1': 0, 'transit2': 0, 'car': 0, 'moto': 0, 'foot': 0}
+    
+    # Tier aggregators
+    tier_attempts = {'Hard': [], 'Medium': [], 'Easy': []}
+    tier_co2_kg   = {'Hard': [], 'Medium': [], 'Easy': []}
+    
+    # Skill aggregators
+    skill_attempts = {k: [] for k in ["Apathetic (-0.10)", "Below Average (-0.05)", "Average (0.00)", "Above Average (+0.05)", "Excellent (+0.10)"]}
+    skill_co2_kg   = {k: [] for k in ["Apathetic (-0.10)", "Below Average (-0.05)", "Average (0.00)", "Above Average (+0.05)", "Excellent (+0.10)"]}
+
+    # Milestone intervals
+    report_step = max(1, num_runs // 10)
+
+    for run_idx in range(1, num_runs + 1):
+        res = run_single_simulation(students_map, max_retakes, learning_rate)
+        
+        sim_co2_kg.append(res['total_co2_kg'])
+        sim_avg_student_co2_kg.append(res['avg_co2_per_student_kg'])
+        sim_trips.append(res['total_round_trips'])
+        
+        for m, cnt in res['mode_counts'].items():
+            global_mode_counts[m] += cnt
+            
+        for tier, data in res['tier_stats'].items():
+            avg_att = (data['attempts'] / data['courses_count']) if data['courses_count'] > 0 else 0.0
+            tier_attempts[tier].append(avg_att)
+            tier_co2_kg[tier].append(data['co2'] / 1000.0)
+            
+        for s_class, data in res['skill_stats'].items():
+            if data['students'] > 0:
+                avg_s_co2 = (data['co2'] / data['students']) / 1000.0
+                avg_s_att = (data['attempts'] / data['failed_courses']) if data['failed_courses'] > 0 else 0.0
+                skill_co2_kg[s_class].append(avg_s_co2)
+                skill_attempts[s_class].append(avg_s_att)
+                
+        if run_idx % report_step == 0 or run_idx == num_runs:
+            pct = (run_idx / num_runs) * 100
+            print(f"  -> Progress: {run_idx:>6,}/{num_runs:,} runs ({pct:>5.1f}%) completed...")
+
+    sim_duration = time.time() - start_sim_time
+    print(f"\nAll {num_runs:,} iterations completed in {sim_duration:.2f} seconds ({num_runs/sim_duration:.0f} runs/sec)!\n")
+
+    # Statistical summaries
+    stats_co2 = calculate_distribution_stats(sim_co2_kg)
+    stats_student_co2 = calculate_distribution_stats(sim_avg_student_co2_kg)
+    stats_trips = calculate_distribution_stats(sim_trips)
+
+    # 1. Global Environmental Footprint Report
+    print("=" * 75)
+    print("  1. GLOBAL ENVIRONMENTAL FOOTPRINT & MOBILITY STATISTICS")
+    print("=" * 75)
+    print(f"{'Metric':<35} | {'Mean ± SD':<20} | {'Median [P25 - P75]':<20}")
+    print("-" * 75)
+    print(f"{'Total CO2 Footprint (kg)':<35} | {stats_co2['mean']:>7.2f} ± {stats_co2['std']:<9.2f} | {stats_co2['median']:>7.2f} [{stats_co2['p25']:.1f} - {stats_co2['p75']:.1f}]")
+    print(f"{'Avg CO2 per Student (kg)':<35} | {stats_student_co2['mean']:>7.2f} ± {stats_student_co2['std']:<9.2f} | {stats_student_co2['median']:>7.2f} [{stats_student_co2['p25']:.1f} - {stats_student_co2['p75']:.1f}]")
+    print(f"{'Total Round Trips Generated':<35} | {stats_trips['mean']:>7.1f} ± {stats_trips['std']:<9.1f} | {stats_trips['median']:>7.1f} [{stats_trips['p25']:.0f} - {stats_trips['p75']:.0f}]")
+    print("-" * 75)
+    print(f"-> 95% Confidence Interval (Total CO2): [{stats_co2['ci95'][0]:.2f} kg - {stats_co2['ci95'][1]:.2f} kg]")
+    print(f"-> Full Simulation Range (Total CO2):    Min: {stats_co2['min']:.2f} kg | Max: {stats_co2['max']:.2f} kg (IQR: {stats_co2['iqr']:.2f} kg)")
+    print(f"-> 90% Confidence Interval Range:        P5: {stats_co2['p5']:.2f} kg  | P95: {stats_co2['p95']:.2f} kg\n")
+
+    # 2. Breakdown by Course Difficulty Tier
+    print("=" * 75)
+    print("  2. BREAKDOWN BY COURSE DIFFICULTY TIER")
+    print("=" * 75)
+    print(f"{'Difficulty Tier':<16} | {'Courses Included':<30} | {'Mean Attempts':<14} | {'Mean CO2 (kg)':<14}")
+    print("-" * 75)
+    tier_desc = {
+        'Hard': 'Λογιστική, Στατιστική',
+        'Medium': 'Μικροοικονομία, Δίκαιο',
+        'Easy': 'Πληροφοριακά, Μακροοικονομία'
+    }
+    for tier in ['Hard', 'Medium', 'Easy']:
+        att_stat = calculate_distribution_stats(tier_attempts[tier])
+        co2_stat = calculate_distribution_stats(tier_co2_kg[tier])
+        co2_pct = (co2_stat['mean'] / stats_co2['mean'] * 100) if stats_co2['mean'] > 0 else 0
+        print(f"{tier:<16} | {tier_desc[tier]:<30} | {att_stat['mean']:>6.2f} ± {att_stat['std']:<4.2f}   | {co2_stat['mean']:>6.2f} kg ({co2_pct:>4.1f}%)")
+    print("\n")
+
+    # 3. Breakdown by Student Skill Archetype
+    print("=" * 75)
+    print("  3. BREAKDOWN BY STUDENT SKILL PROFILE")
+    print("=" * 75)
+    print(f"{'Student Archetype':<26} | {'Sample %':<10} | {'Mean Attempts/Course':<20} | {'Mean CO2/Student':<16}")
+    print("-" * 75)
+    skill_pcts = {
+        "Apathetic (-0.10)": "20%",
+        "Below Average (-0.05)": "25%",
+        "Average (0.00)": "30% (Mode)",
+        "Above Average (+0.05)": "15%",
+        "Excellent (+0.10)": "10%"
+    }
+    for s_class in ["Apathetic (-0.10)", "Below Average (-0.05)", "Average (0.00)", "Above Average (+0.05)", "Excellent (+0.10)"]:
+        if skill_co2_kg[s_class]:
+            att_stat = calculate_distribution_stats(skill_attempts[s_class])
+            co2_stat = calculate_distribution_stats(skill_co2_kg[s_class])
+            print(f"{s_class:<26} | {skill_pcts[s_class]:<10} | {att_stat['mean']:>6.2f} ± {att_stat['std']:<4.2f} attempts   | {co2_stat['mean']:>6.2f} ± {co2_stat['std']:<4.2f} kg")
+    print("\n")
+
+    # 4. Modal Split across all simulations
+    print("=" * 75)
+    print("  4. TRANSPORTATION MODE DISTRIBUTION (ACROSS ALL RUNS)")
+    print("=" * 75)
+    total_legs = sum(global_mode_counts.values())
+    mode_names = [
+        ('transit1', 'Metro + Bus'),
+        ('transit2', 'Direct Bus'),
+        ('car', 'Car (Driver / Carpool / Lift)'),
+        ('moto', 'Motorcycle'),
+        ('foot', 'Walking')
+    ]
+    for m_id, m_label in mode_names:
+        cnt = global_mode_counts.get(m_id, 0)
         pct = (cnt / total_legs * 100) if total_legs > 0 else 0
-        co2_sum = mode_co2[m_id]
-        print(f"   * {name:<24}: {cnt:>4} legs ({pct:>4.1f}%) | CO2: {co2_sum:>6} g")
-    print(f"============================================================")
+        bar = "█" * int(pct / 2.5)
+        print(f"  * {m_label:<32}: {pct:>5.1f}% | {bar}")
+    print("=" * 75 + "\n")
 
 if __name__ == '__main__':
-    # Run simulation for grades between 0.0 and 2.0
-    run_simulation(0.0, 2.0)
+    parser = argparse.ArgumentParser(description="Multi-run Monte Carlo simulation for university student mobility & CO2 emissions.")
+    parser.add_argument('-n', '--runs', type=int, default=1000, help="Number of Monte Carlo simulation runs (default: 1000)")
+    parser.add_argument('--min-grade', type=float, default=0.0, help="Minimum initial failing grade (default: 0.0)")
+    parser.add_argument('--max-grade', type=float, default=2.0, help="Maximum initial failing grade (default: 2.0)")
+    parser.add_argument('--max-retakes', type=int, default=6, help="Maximum retake attempts before loop termination (default: 6)")
+    parser.add_argument('--learning-rate', type=float, default=0.05, help="Learning boost to 'a' per retake attempt (default: 0.05)")
+
+    args = parser.parse_args()
+
+    run_monte_carlo_experiments(
+        num_runs=args.runs,
+        min_grade=args.min_grade,
+        max_grade=args.max_grade,
+        max_retakes=args.max_retakes,
+        learning_rate=args.learning_rate
+    )

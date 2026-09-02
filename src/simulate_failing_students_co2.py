@@ -48,11 +48,11 @@ UNIVERSITIES = {
 TARGET_CAMPUS = "UNIWA Egaleo"
 DEST_LAT, DEST_LON = UNIVERSITIES.get(TARGET_CAMPUS, (37.9857, 23.6792))
 
-# Emission factors in grams of CO2 per passenger-kilometer
-EF_CAR   = 120.0
-EF_MOTO  = 70.0
-EF_BUS   = 10.81
-EF_METRO = 3.1
+# Emission factors in grams of CO2 per passenger-minute (Attica bounds, Metro 35km/h)
+EF_CAR   = 60.0
+EF_MOTO  = 40.8
+EF_BUS   = 3.6
+EF_METRO = 1.74
 EF_FOOT  = 0.0
 
 # Mode bias values (Alternative-Specific Constants)
@@ -224,7 +224,7 @@ def compute_student_leg_fast(clean_tk, is_peak=True, reverse=False, go_mode_id=N
                     return {
                         'mode_id': 'car',
                         'mode_name': 'Car [Pick-up]',
-                        'co2_grams': round(car_dist_km * EF_CAR * 2.0),
+                        'co2_grams': round(car_dur_min * EF_CAR * 2.0),
                         'dur_min': round(car_dur_min, 1),
                         'dist_km': round(car_dist_km, 2),
                         'is_driver': False
@@ -233,7 +233,7 @@ def compute_student_leg_fast(clean_tk, is_peak=True, reverse=False, go_mode_id=N
                     return {
                         'mode_id': 'car',
                         'mode_name': 'Car [Carpool]',
-                        'co2_grams': round(car_dist_km * EF_CAR * 0.5),
+                        'co2_grams': round(car_dur_min * EF_CAR * 0.5),
                         'dur_min': round(car_dur_min, 1),
                         'dist_km': round(car_dist_km, 2),
                         'is_driver': False
@@ -244,14 +244,14 @@ def compute_student_leg_fast(clean_tk, is_peak=True, reverse=False, go_mode_id=N
     # Mode 1: Car
     if has_car or (reverse and not go_mode_id):
         cost_car = car_dur_min + 5.0 + ASC_CAR
-        co2_car = car_dist_km * EF_CAR
+        co2_car = car_dur_min * EF_CAR
         modes.append(('car', 'Car', cost_car, co2_car, car_dur_min, 'road'))
 
     # Mode 2: Moto
     if has_moto or (reverse and not go_mode_id):
         dur_moto = car_dur_min * 0.8
         cost_moto = dur_moto + 2.0 + ASC_MOTO
-        co2_moto = car_dist_km * EF_MOTO
+        co2_moto = dur_moto * EF_MOTO
         modes.append(('moto', 'Motorcycle', cost_moto, co2_moto, dur_moto, 'road'))
 
     # Modes 3 & 4: Public Transit
@@ -268,13 +268,13 @@ def compute_student_leg_fast(clean_tk, is_peak=True, reverse=False, go_mode_id=N
             c_co2 = 0.0
             has_rail = False
             for leg in legs:
-                d_km = leg.get('distance', 0) / 1000.0
+                leg_dur_min = leg.get('duration', 0) / 60.0
                 m = leg.get('mode', '').upper()
                 if m in ['SUBWAY', 'METRO', 'TRAM', 'RAIL']:
-                    c_co2 += d_km * EF_METRO
+                    c_co2 += leg_dur_min * EF_METRO
                     has_rail = True
                 elif m == 'BUS':
-                    c_co2 += d_km * EF_BUS
+                    c_co2 += leg_dur_min * EF_BUS
             
             asc = ASC_T1 if has_rail else ASC_T2
             penalty_transfer = num_transfers * (10.0 if not is_peak else 6.0)
@@ -286,7 +286,7 @@ def compute_student_leg_fast(clean_tk, is_peak=True, reverse=False, go_mode_id=N
         d_transit = car_dist_km * 1.25
         dur_t1 = (d_transit / 25.0) * 60.0 + 8.0
         cost_t1 = dur_t1 + 1.2 * 5.0 + 1.5 * 5.0 + 8.0 + ASC_T1
-        co2_t1 = (d_transit * 0.7 * EF_METRO) + (d_transit * 0.3 * EF_BUS)
+        co2_t1 = (dur_t1 * 0.5 * EF_METRO) + (dur_t1 * 0.5 * EF_BUS)
         modes.append(('transit1', 'Metro + Bus', cost_t1, co2_t1, dur_t1, 'transit'))
 
     # Mode 5: Walking

@@ -764,13 +764,14 @@
                 const hasBus = legs.some(leg => leg.mode === 'BUS');
 
                 // Calculate CO2
-                const EF_BUS = 10.81;
-                const EF_METRO = 3.1;
+                const EF_BUS = 3.6;
+                const EF_METRO = 1.74;
                 let co2_g = 0;
                 legs.forEach(leg => {
                     const distKm = leg.distance / 1000;
-                    if (leg.mode === 'BUS') co2_g += distKm * EF_BUS;
-                    else if (['SUBWAY', 'TRAM', 'RAIL'].includes(leg.mode)) co2_g += distKm * EF_METRO;
+                    let legDurMin = leg.duration / 60.0;
+                    if (leg.mode === 'BUS') co2_g += legDurMin * EF_BUS;
+                    else if (['SUBWAY', 'TRAM', 'RAIL'].includes(leg.mode)) co2_g += legDurMin * EF_METRO;
                 });
 
                 const durMin = Math.round(itin.duration / 60);
@@ -816,18 +817,18 @@
             const metroWait1 = isPeak ? 4 : 6;
             const busWait1 = isPeak ? 7 : 11;
 
-            const EF_CAR   = 120.0;
-            const EF_MOTO  = 70.0;
-            const EF_BUS   = 10.81;
-            const EF_METRO = 3.1;
+            const EF_CAR   = 60.0;
+            const EF_MOTO  = 40.8;
+            const EF_BUS   = 3.6;
+            const EF_METRO = 1.74;
 
             const carDistKm = carRoute ? (carRoute.distance / 1000) : 2.5;
             const carDurMin = carRoute ? (carRoute.duration / 60 * carMultiplier) : (10.0 * carMultiplier);
-            const carCO2Grams = Math.round(carDistKm * EF_CAR);
+            const carCO2Grams = Math.round(carDurMin * EF_CAR);
 
             const motoDistKm = carDistKm;
             const motoDurMin = carDurMin * 0.90;
-            const motoCO2Grams = Math.round(motoDistKm * EF_MOTO);
+            const motoCO2Grams = Math.round(motoDurMin * EF_MOTO);
 
             const footDistKm = footRoute ? (footRoute.distance / 1000) : 1.8;
             const footDurMin = footRoute ? Math.round(footRoute.duration / 60) : 22;
@@ -855,7 +856,7 @@
                 t1_waitTotal = t1_wait1 + t1_wait2;
                 t1_walkTotal = t1_walk1 + t1_walk2;
                 t1_totalDur = t1_walkTotal + t1_waitTotal + t1_inVehicleTotal;
-                t1_co2Grams = Math.round((busDistKm * 0.45 * EF_METRO) + (busDistKm * 0.55 * EF_BUS));
+                t1_co2Grams = Math.round((t1_totalDur * 0.5 * EF_METRO) + (t1_totalDur * 0.5 * EF_BUS));
                 t1_stepsHTML = `
                     <div class="step-row"><div><span class="step-tag">Walk</span><span class="step-title-text">Walk to Bus Stop</span><div class="step-subtext">Origin (TK ${tk1})</div></div><span class="step-meta">${t1_walk1} min</span></div>
                     <div class="step-row"><div><span class="step-tag">Wait</span><span class="step-title-text">Wait at OSY Stop</span><div class="step-subtext">${busStop1.name}</div></div><span class="step-meta">${t1_wait1} min</span></div>
@@ -891,7 +892,7 @@
                 t2_waitTotal = t2_wait1;
                 t2_walkTotal = t2_walk1 + t2_walk2;
                 t2_totalDur = t2_walkTotal + t2_waitTotal + t2_inVehicleTotal;
-                t2_co2Grams = Math.round(busDistKm * EF_BUS);
+                t2_co2Grams = Math.round(t2_totalDur * EF_BUS);
                 t2_stepsHTML = `
                     <div class="step-row"><div><span class="step-tag">Walk</span><span class="step-title-text">Walk to Bus Stop</span><div class="step-subtext">Origin (TK ${tk1})</div></div><span class="step-meta">${t2_walk1} min</span></div>
                     <div class="step-row"><div><span class="step-tag">Wait</span><span class="step-title-text">Wait at OSY Stop</span><div class="step-subtext">${busStop1.name}</div></div><span class="step-meta">${t2_wait1} min</span></div>
@@ -1050,7 +1051,7 @@
                     <div class="card-metrics">
                         <div class="metric"><span class="metric-val">${carDistKm.toFixed(2)} km</span><span class="metric-lbl">Distance</span></div>
                         <div class="metric"><span class="metric-val">${carDurMin.toFixed(1)} min</span><span class="metric-lbl">Drive Time</span></div>
-                        <div class="metric"><span class="metric-val">120 g</span><span class="metric-lbl">EF (g/pax-km)</span></div>
+                        <div class="metric"><span class="metric-val">60 g</span><span class="metric-lbl">EF (g/pax-min)</span></div>
                     </div>
                     <div class="co2-box">
                         <span class="co2-lbl">Carbon Footprint:</span>
@@ -1073,7 +1074,7 @@
                     <div class="card-metrics">
                         <div class="metric"><span class="metric-val">${motoDistKm.toFixed(2)} km</span><span class="metric-lbl">Distance</span></div>
                         <div class="metric"><span class="metric-val">${motoDurMin.toFixed(1)} min</span><span class="metric-lbl">Travel Time</span></div>
-                        <div class="metric"><span class="metric-val">70 g</span><span class="metric-lbl">EF (g/pax-km)</span></div>
+                        <div class="metric"><span class="metric-val">40.8 g</span><span class="metric-lbl">EF (g/pax-min)</span></div>
                     </div>
                     <div class="co2-box">
                         <span class="co2-lbl">Carbon Footprint:</span>

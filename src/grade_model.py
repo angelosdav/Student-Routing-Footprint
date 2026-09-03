@@ -71,9 +71,9 @@ if __name__ == '__main__':
     print("STARTING GRADE MODELING ENGINE...\n")
     
     # 6 Courses mathematically tuned to hit the exact pass rates from the real dataset
-    print_distribution(-0.32, "ΔΙΟΙΚΗΤΙΚΗ ΛΟΓΙΣΤΙΚΗ (Hard)")           # Target: 25.8%
-    print_distribution(-0.14, "ΣΤΑΤΙΣΤΙΚΗ ΕΠΙΧΕΙΡΗΣΕΩΝ (Hard)")      # Target: 44.1%
-    print_distribution(-0.08, "ΜΙΚΡΟΟΙΚΟΝΟΜΙΑ (Medium)")               # Target: 51.9%
-    print_distribution(-0.02, "ΕΙΣΑΓΩΓΗ ΣΤΟ ΔΙΚΑΙΟ (Medium)")          # Target: 59.4%
-    print_distribution(0.15,  "ΠΛΗΡΟΦΟΡΙΑΚΑ ΣΥΣΤΗΜΑΤΑ ΔΙΟΙΚΗΣΗΣ (Easy)") # Target: 85.4%
-    print_distribution(0.33,  "ΜΑΚΡΟΟΙΚΟΝΟΜΙΑ (Easy)")                 # Target: 95.3%
+    print_distribution(-0.08, "COURSE_SEM1_MEDIUM") # Target: 51.9%
+    print_distribution(-0.02, "COURSE_SEM2_MEDIUM") # Target: 59.4%
+    print_distribution(-0.14, "COURSE_SEM2_HARD")   # Target: 44.1%
+    print_distribution(0.33,  "COURSE_SEM2_EASY")   # Target: 95.3%
+    print_distribution(-0.32, "COURSE_SEM4_HARD")   # Target: 25.8%
+    print_distribution(0.15,  "COURSE_SEM4_EASY")   # Target: 85.4%

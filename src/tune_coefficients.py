@@ -43,12 +43,12 @@ def tune_courses():
     matches the Target Pass Rate (the empirical rate from the data).
     """
     targets = [
-        ('ΔΙΟΙΚΗΤΙΚΗ ΛΟΓΙΣΤΙΚΗ', 25.8), 
-        ('ΣΤΑΤΙΣΤΙΚΗ ΕΠΙΧΕΙΡΗΣΕΩΝ', 44.1), 
-        ('ΜΙΚΡΟΟΙΚΟΝΟΜΙΑ', 51.9), 
-        ('ΕΙΣΑΓΩΓΗ ΣΤΟ ΔΙΚΑΙΟ', 59.4), 
-        ('ΠΛΗΡΟΦΟΡΙΑΚΑ ΣΥΣΤΗΜΑΤΑ ΔΙΟΙΚΗΣΗΣ', 85.4), 
-        ('ΜΑΚΡΟΟΙΚΟΝΟΜΙΑ', 95.3)
+        ('COURSE_SEM1_MEDIUM', 51.9), 
+        ('COURSE_SEM2_MEDIUM', 59.4), 
+        ('COURSE_SEM2_HARD',   44.1), 
+        ('COURSE_SEM2_EASY',   95.3), 
+        ('COURSE_SEM4_HARD',   25.8), 
+        ('COURSE_SEM4_EASY',   85.4)
     ]
 
     print("Starting Auto-Tuning of Courses...\n")

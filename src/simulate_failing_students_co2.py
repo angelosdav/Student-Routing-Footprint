@@ -65,12 +65,12 @@ THETA     = 0.09
 
 # Course metadata: difficulty tiers and base coefficients
 COURSES_META = {
-    "ΔΙΟΙΚΗΤΙΚΗ ΛΟΓΙΣΤΙΚΗ": {"a": -0.32, "tier": "Hard"},
-    "ΣΤΑΤΙΣΤΙΚΗ ΕΠΙΧΕΙΡΗΣΕΩΝ": {"a": -0.14, "tier": "Hard"},
-    "ΜΙΚΡΟΟΙΚΟΝΟΜΙΑ": {"a": -0.08, "tier": "Medium"},
-    "ΕΙΣΑΓΩΓΗ ΣΤΟ ΔΙΚΑΙΟ": {"a": -0.02, "tier": "Medium"},
-    "ΠΛΗΡΟΦΟΡΙΑΚΑ ΣΥΣΤΗΜΑΤΑ ΔΙΟΙΚΗΣΗΣ": {"a": 0.15, "tier": "Easy"},
-    "ΜΑΚΡΟΟΙΚΟΝΟΜΙΑ": {"a": 0.33, "tier": "Easy"}
+    "COURSE_SEM1_MEDIUM": {"a": -0.08, "tier": "Medium"},
+    "COURSE_SEM2_MEDIUM": {"a": -0.02, "tier": "Medium"},
+    "COURSE_SEM2_HARD":   {"a": -0.14, "tier": "Hard"},
+    "COURSE_SEM2_EASY":   {"a": 0.33,  "tier": "Easy"},
+    "COURSE_SEM4_HARD":   {"a": -0.32, "tier": "Hard"},
+    "COURSE_SEM4_EASY":   {"a": 0.15,  "tier": "Easy"}
 }
 
 # In-memory routing cache to allow thousands of fast Monte Carlo iterations
@@ -654,9 +654,9 @@ def run_monte_carlo_experiments(num_runs=1000, min_grade=0.0, max_grade=2.0, max
     print(f"{'Difficulty Tier':<16} | {'Courses Included':<30} | {'Mean Attempts':<14} | {'Mean CO2 (kg)':<14}")
     print("-" * 75)
     tier_desc = {
-        'Hard': 'Λογιστική, Στατιστική',
-        'Medium': 'Μικροοικονομία, Δίκαιο',
-        'Easy': 'Πληροφοριακά, Μακροοικονομία'
+        'Hard': 'COURSE_SEM2_HARD, COURSE_SEM4_HARD',
+        'Medium': 'COURSE_SEM1_MEDIUM, COURSE_SEM2_MEDIUM',
+        'Easy': 'COURSE_SEM2_EASY, COURSE_SEM4_EASY'
     }
     for tier in ['Hard', 'Medium', 'Easy']:
         att_stat = calculate_distribution_stats(tier_attempts[tier])

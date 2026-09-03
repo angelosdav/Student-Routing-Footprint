@@ -11,12 +11,12 @@ POSTCODES_PATH = os.path.join(BASE_DIR, 'data', 'postcodes_attica.json')
 OUTPUT_CSV_PATH = os.path.join(BASE_DIR, 'data', 'synthetic_students.csv')
 
 COURSES = [
-    {"name": "ΔΙΟΙΚΗΤΙΚΗ ΛΟΓΙΣΤΙΚΗ", "a": -0.32},
-    {"name": "ΣΤΑΤΙΣΤΙΚΗ ΕΠΙΧΕΙΡΗΣΕΩΝ", "a": -0.14},
-    {"name": "ΜΙΚΡΟΟΙΚΟΝΟΜΙΑ", "a": -0.08},
-    {"name": "ΕΙΣΑΓΩΓΗ ΣΤΟ ΔΙΚΑΙΟ", "a": -0.02},
-    {"name": "ΠΛΗΡΟΦΟΡΙΑΚΑ ΣΥΣΤΗΜΑΤΑ ΔΙΟΙΚΗΣΗΣ", "a": 0.15},
-    {"name": "ΜΑΚΡΟΟΙΚΟΝΟΜΙΑ", "a": 0.33}
+    {"name": "COURSE_SEM1_MEDIUM", "a": -0.08},
+    {"name": "COURSE_SEM2_MEDIUM", "a": -0.02},
+    {"name": "COURSE_SEM2_HARD",   "a": -0.14},
+    {"name": "COURSE_SEM2_EASY",   "a": 0.33},
+    {"name": "COURSE_SEM4_HARD",   "a": -0.32},
+    {"name": "COURSE_SEM4_EASY",   "a": 0.15}
 ]
 
 def load_postcodes():

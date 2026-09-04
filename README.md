@@ -130,6 +130,7 @@ The full end-to-end execution follows this step-by-step stochastic workflow:
 
 - **`data/postcodes_attica.json`**: Local geocoding fallback mapping 272 Attica postal codes to coordinates.
 - **`data/synthetic_students.csv`**: Generated dataset of 1,800 exam outcomes including `STUDENT_ID`, `TK_KATOIKIA`, `COURSE`, `GRADE`, and `SKILL`.
+- **`data/experiments_log.csv`**: Persistent audit log storing statistical snapshots (CO2, CI95, mode splits, retake attempts) for every simulation batch.
 - **`config/config.json`**: Configuration for the MNL model and simulation parameters.
 
 ## Requirements
@@ -194,3 +195,28 @@ This outputs a detailed CLI report of every student's trips and the total aggreg
 
 ### 3. Web Dashboard
 Open `frontend/index.html` in your web browser to visually explore optimal routes, modal split probabilities, and emissions between any specific postal code and the campus.
+
+## CLI Reference Guide
+
+The Monte Carlo simulation script (`src/simulate_failing_students_co2.py`) provides full command-line configurability to evaluate diverse experimental parameters and intervention policies.
+
+### Arguments
+
+| Parameter | Flag | Type | Default | Description |
+|---|:---:|:---:|:---:|---|
+| `--runs` | `-n` | `int` | `1000` | Number of Monte Carlo simulation iterations to execute in memory. |
+| `--scenario` | `-s` | `str` | `"Baseline"` | Label identifier assigned to the experiment in the persistent logging database. |
+| `--campus` | `-c` | `str` | `"UNIWA Egaleo"` | Destination university campus coordinates for multimodal commute routing. |
+| `--learning-rate` | | `float` | `0.05` | Linear increment added to the student's difficulty coefficient ($a$) per consecutive retake attempt. |
+| `--max-retakes` | | `int` | `6` | Upper limit on allowed exam retake attempts per course before terminating the retake loop (infinite loop safeguard). |
+| `--min-grade` | | `float` | `0.0` | Lower bound for initial exam grades included in the failing cohort filter. |
+| `--max-grade` | | `float` | `2.0` | Upper bound for initial exam grades included in the failing cohort filter. |
+
+### Parameter Details
+
+- **`--runs` (`-n`)**: Controls the statistical sample size of the Monte Carlo engine. Higher values increase estimation precision and narrow the 95% Confidence Interval for mean emissions and modal splits.
+- **`--scenario` (`-s`)**: Sets the experiment label written to `data/experiments_log.csv`. Allows multiple distinct policy evaluations to be stored sequentially without overwriting previous runs.
+- **`--campus` (`-c`)**: Selects the target destination campus from 22 supported Greek university campuses (e.g., `UNIWA Egaleo`, `EKPA Zografou`, `EMP Zografou`, `OPA Center`, `PAPEI Center`). Dynamically routes student journeys to the selected coordinates.
+- **`--learning-rate`**: Governs the rate of academic progression during retakes ($Effective\ a_{\text{attempt}} = a_{\text{base}} + skill + PrepBoost + (attempt - 1) \cdot LearningRate$). Higher values model targeted academic interventions, tutoring programs, or enhanced study materials.
+- **`--max-retakes`**: Enforces an administrative cap on examination attempts. Used to model academic progression policies and prevent divergent execution loops.
+- **`--min-grade` / `--max-grade`**: Defines the severity threshold of academic failure analyzed. Set to `[0.0, 2.0]` to isolate severe failures, or expand to `[0.0, 4.0]` to capture all non-passing exam attempts.

@@ -225,3 +225,7 @@ data/otp-data/
 
 # Python Virtual Env
 venv_3/
+
+# Experiments output log
+data/experiments_log.csv
+experiments_log.csv

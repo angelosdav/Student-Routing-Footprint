@@ -6,6 +6,7 @@ import os
 import requests
 import argparse
 import time
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
 # Import grade distribution and random choice functions from grade_model
@@ -14,6 +15,7 @@ from grade_model import generate_course_distribution
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 POSTCODES_PATH = os.path.join(BASE_DIR, 'data', 'postcodes_attica.json')
 DATASET_PATH = os.path.join(BASE_DIR, 'data', 'synthetic_students.csv')
+LOG_CSV_PATH = os.path.join(BASE_DIR, 'data', 'experiments_log.csv')
 
 # Load postcodes
 with open(POSTCODES_PATH, 'r', encoding='utf-8') as f:
@@ -481,17 +483,21 @@ def run_single_simulation(students_map, max_retakes=6, learning_rate=0.05):
                 
                 # Simulate the exam retake grade
                 # Experience/Preparation boost: Scales dynamically with the student's study archetype
-                # Apathetic barely studies (+0.02), while Excellent students prepare seriously (+0.18)
-                skill_learning_rates = {
+                # Base rates are centered around default learning_rate = 0.05
+                base_tier_rates = {
                     "Apathetic (-0.10)": 0.02,
                     "Below Average (-0.05)": 0.04,
                     "Average (0.00)": 0.06,
                     "Above Average (+0.05)": 0.10,
                     "Excellent (+0.10)": 0.18
                 }
-                boost_rate = skill_learning_rates.get(s_class, learning_rate)
-                # First retake also gets an immediate preparation boost for top students (they study seriously)
-                initial_prep_boost = 0.24 if skill > 0.075 else (0.12 if skill > 0.025 else (0.05 if skill > -0.025 else 0.0))
+                # Scale multiplier: ratio of CLI learning_rate to base default 0.05
+                scale_factor = (learning_rate / 0.05) if learning_rate > 0 else 0.0
+                boost_rate = base_tier_rates.get(s_class, 0.05) * scale_factor
+                
+                # First retake initial preparation boost also scales dynamically with learning_rate
+                base_prep = 0.24 if skill > 0.075 else (0.12 if skill > 0.025 else (0.05 if skill > -0.025 else 0.0))
+                initial_prep_boost = base_prep * scale_factor
                 
                 effective_a = base_a + skill + initial_prep_boost + (attempts - 1) * boost_rate
                 dist = generate_course_distribution(effective_a)
@@ -559,12 +565,61 @@ def calculate_distribution_stats(values):
         'ci95': (ci_lower, ci_upper)
     }
 
-def run_monte_carlo_experiments(num_runs=1000, min_grade=0.0, max_grade=2.0, max_retakes=6, learning_rate=0.05):
+def log_experiment_results(log_data, log_path=LOG_CSV_PATH):
+    """Appends experiment execution summary and metadata to the experiments_log.csv file."""
+    file_exists = os.path.exists(log_path)
+    
+    fieldnames = [
+        "Date",
+        "Scenario_Name",
+        "Runs",
+        "Target_Campus",
+        "Grade_Filter",
+        "Failing_Students_Count",
+        "Max_Retakes",
+        "Learning_Rate",
+        "Total_CO2_Mean_kg",
+        "Total_CO2_SD_kg",
+        "CI95_Lower_kg",
+        "CI95_Upper_kg",
+        "Avg_CO2_Per_Student_kg",
+        "Total_Round_Trips_Mean",
+        "Hard_Tier_CO2_pct",
+        "Medium_Tier_CO2_pct",
+        "Easy_Tier_CO2_pct",
+        "Hard_Avg_Attempts",
+        "Medium_Avg_Attempts",
+        "Easy_Avg_Attempts",
+        "Overall_Avg_Attempts",
+        "Transit_Share_pct",
+        "Car_Share_pct",
+        "Moto_Share_pct",
+        "Execution_Time_sec"
+    ]
+    
+    with open(log_path, 'a', newline='', encoding='utf-8-sig') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(log_data)
+        
+    print(f"[LOG] Experiment metadata successfully logged to: {log_path}\n")
+
+def run_monte_carlo_experiments(num_runs=1000, min_grade=0.0, max_grade=2.0, max_retakes=6, learning_rate=0.05, scenario_name="Baseline", campus="UNIWA Egaleo"):
     """Executes N Monte Carlo iterations and displays comprehensive statistical summaries."""
+    global TARGET_CAMPUS, DEST_LAT, DEST_LON
+    TARGET_CAMPUS = campus
+    if campus in UNIVERSITIES:
+        DEST_LAT, DEST_LON = UNIVERSITIES[campus]
+    else:
+        print(f"Warning: Campus '{campus}' not recognized. Falling back to UNIWA Egaleo.")
+        TARGET_CAMPUS = "UNIWA Egaleo"
+        DEST_LAT, DEST_LON = UNIVERSITIES["UNIWA Egaleo"]
+
     print("=" * 70)
     print(f"  MONTE CARLO MOBILITY & CO2 SIMULATION ENGINE ({num_runs:,} ITERATIONS)")
-    print(f"  Target Campus: {TARGET_CAMPUS} | Grade Filter: [{min_grade} - {max_grade}]")
-    print(f"  Retake Mechanism: Max {max_retakes} attempts | Learning Boost: +{learning_rate} 'a'/attempt")
+    print(f"  Scenario: {scenario_name} | Target Campus: {TARGET_CAMPUS}")
+    print(f"  Grade Filter: [{min_grade} - {max_grade}] | Max Retakes: {max_retakes} | Learning Rate: +{learning_rate}")
     print("=" * 70 + "\n")
 
     # Load dataset
@@ -658,10 +713,14 @@ def run_monte_carlo_experiments(num_runs=1000, min_grade=0.0, max_grade=2.0, max
         'Medium': 'COURSE_SEM1_MEDIUM, COURSE_SEM2_MEDIUM',
         'Easy': 'COURSE_SEM2_EASY, COURSE_SEM4_EASY'
     }
+    tier_co2_pcts = {}
+    tier_mean_atts = {}
     for tier in ['Hard', 'Medium', 'Easy']:
         att_stat = calculate_distribution_stats(tier_attempts[tier])
         co2_stat = calculate_distribution_stats(tier_co2_kg[tier])
         co2_pct = (co2_stat['mean'] / stats_co2['mean'] * 100) if stats_co2['mean'] > 0 else 0
+        tier_co2_pcts[tier] = round(co2_pct, 1)
+        tier_mean_atts[tier] = round(att_stat['mean'], 2)
         print(f"{tier:<16} | {tier_desc[tier]:<30} | {att_stat['mean']:>6.2f} ± {att_stat['std']:<4.2f}   | {co2_stat['mean']:>6.2f} kg ({co2_pct:>4.1f}%)")
     print("\n")
 
@@ -697,16 +756,54 @@ def run_monte_carlo_experiments(num_runs=1000, min_grade=0.0, max_grade=2.0, max
         ('moto', 'Motorcycle'),
         ('foot', 'Walking')
     ]
+    mode_shares = {}
     for m_id, m_label in mode_names:
         cnt = global_mode_counts.get(m_id, 0)
         pct = (cnt / total_legs * 100) if total_legs > 0 else 0
+        mode_shares[m_id] = round(pct, 1)
         bar = "█" * int(pct / 2.5)
         print(f"  * {m_label:<32}: {pct:>5.1f}% | {bar}")
     print("=" * 75 + "\n")
 
+    # 5. Calculate overall average attempts across all failed courses
+    all_failed_courses_count = sum(len(s['failed_courses']) for s in students_map.values())
+    overall_avg_attempts = (stats_trips['mean'] / all_failed_courses_count) if all_failed_courses_count > 0 else 0.0
+
+    # Log experiment results to CSV
+    log_payload = {
+        "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Scenario_Name": scenario_name,
+        "Runs": num_runs,
+        "Target_Campus": TARGET_CAMPUS,
+        "Grade_Filter": f"[{min_grade} - {max_grade}]",
+        "Failing_Students_Count": len(students_map),
+        "Max_Retakes": max_retakes,
+        "Learning_Rate": learning_rate,
+        "Total_CO2_Mean_kg": round(stats_co2['mean'], 2),
+        "Total_CO2_SD_kg": round(stats_co2['std'], 2),
+        "CI95_Lower_kg": round(stats_co2['ci95'][0], 2),
+        "CI95_Upper_kg": round(stats_co2['ci95'][1], 2),
+        "Avg_CO2_Per_Student_kg": round(stats_student_co2['mean'], 2),
+        "Total_Round_Trips_Mean": round(stats_trips['mean'], 1),
+        "Hard_Tier_CO2_pct": tier_co2_pcts.get('Hard', 0.0),
+        "Medium_Tier_CO2_pct": tier_co2_pcts.get('Medium', 0.0),
+        "Easy_Tier_CO2_pct": tier_co2_pcts.get('Easy', 0.0),
+        "Hard_Avg_Attempts": tier_mean_atts.get('Hard', 0.0),
+        "Medium_Avg_Attempts": tier_mean_atts.get('Medium', 0.0),
+        "Easy_Avg_Attempts": tier_mean_atts.get('Easy', 0.0),
+        "Overall_Avg_Attempts": round(overall_avg_attempts, 2),
+        "Transit_Share_pct": round(mode_shares.get('transit1', 0.0) + mode_shares.get('transit2', 0.0), 1),
+        "Car_Share_pct": mode_shares.get('car', 0.0),
+        "Moto_Share_pct": mode_shares.get('moto', 0.0),
+        "Execution_Time_sec": round(sim_duration, 2)
+    }
+    log_experiment_results(log_payload)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Multi-run Monte Carlo simulation for university student mobility & CO2 emissions.")
     parser.add_argument('-n', '--runs', type=int, default=1000, help="Number of Monte Carlo simulation runs (default: 1000)")
+    parser.add_argument('-s', '--scenario', type=str, default="Baseline", help="Name of the scenario or policy tested (default: 'Baseline')")
+    parser.add_argument('-c', '--campus', type=str, default="UNIWA Egaleo", choices=list(UNIVERSITIES.keys()), help="Target university campus for commute routing (default: 'UNIWA Egaleo')")
     parser.add_argument('--min-grade', type=float, default=0.0, help="Minimum initial failing grade (default: 0.0)")
     parser.add_argument('--max-grade', type=float, default=2.0, help="Maximum initial failing grade (default: 2.0)")
     parser.add_argument('--max-retakes', type=int, default=6, help="Maximum retake attempts before loop termination (default: 6)")
@@ -719,5 +816,7 @@ if __name__ == '__main__':
         min_grade=args.min_grade,
         max_grade=args.max_grade,
         max_retakes=args.max_retakes,
-        learning_rate=args.learning_rate
+        learning_rate=args.learning_rate,
+        scenario_name=args.scenario,
+        campus=args.campus
     )

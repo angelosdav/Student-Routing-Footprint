@@ -110,7 +110,7 @@ The full end-to-end execution follows this step-by-step stochastic workflow:
 3. **Route Generation**: 
    - Queries local OSRM engines for Car and Walking routes.
    - Queries OpenTripPlanner for actual Transit itineraries.
-   - *Fallback*: Uses Haversine distance approximations if Docker engines are offline.
+   - *Fallback*: Uses Haversine distance approximations if Docker engines are offline. (**Data Integrity Guard**: Automated logging to `experiments_log.csv` is safely aborted if this fallback is triggered, preventing inaccurate spatial data from polluting research statistics.)
 4. **Cost Calculation**: Computes the generalized cost for all available modes.
 5. **Outbound Leg (Peak Hours)**: Uses the Multinomial Logit Model to select the mode.
 6. **Inbound Leg (Off-Peak)**: Incorporates "convenience bias" (80% chance to stick with outbound transit) and calculates return lift probabilities.
@@ -130,7 +130,7 @@ The full end-to-end execution follows this step-by-step stochastic workflow:
 
 - **`data/postcodes_attica.json`**: Local geocoding fallback mapping 272 Attica postal codes to coordinates.
 - **`data/synthetic_students.csv`**: Generated dataset of 1,800 exam outcomes including `STUDENT_ID`, `TK_KATOIKIA`, `COURSE`, `GRADE`, and `SKILL`.
-- **`data/experiments_log.csv`**: Persistent audit log storing statistical snapshots (CO2, CI95, mode splits, retake attempts) for every simulation batch.
+- **`data/experiments_log.csv`**: Persistent audit log storing statistical snapshots (CO2, CI95, mode splits, retake attempts) for every simulation batch. *(Strictly protected by the Fallback Guard: logging is blocked if OSRM/OTP dockers are down).*
 - **`config/config.json`**: Configuration for the MNL model and simulation parameters.
 
 ## Requirements

@@ -77,6 +77,7 @@ COURSES_META = {
 
 # In-memory routing cache to allow thousands of fast Monte Carlo iterations
 POSTCODE_CACHE = {}
+FALLBACKS_TRIGGERED = False
 
 def pseudo_hash(s):
     h = 0
@@ -180,11 +181,14 @@ def preload_postcode_routes(postcodes_to_cache):
         }
 
     start_t = time.time()
+    global FALLBACKS_TRIGGERED
     with ThreadPoolExecutor(max_workers=16) as executor:
         results = executor.map(cache_single_tk, postcodes_to_cache)
         for tk, data in results:
             if data:
                 POSTCODE_CACHE[tk] = data
+                if data.get('is_fallback', False):
+                    FALLBACKS_TRIGGERED = True
                 
     elapsed = time.time() - start_t
     print(f" -> Successfully cached {len(POSTCODE_CACHE)} postcodes in {elapsed:.2f}s.\n")
@@ -797,7 +801,11 @@ def run_monte_carlo_experiments(num_runs=1000, min_grade=0.0, max_grade=2.0, max
         "Moto_Share_pct": mode_shares.get('moto', 0.0),
         "Execution_Time_sec": round(sim_duration, 2)
     }
-    log_experiment_results(log_payload)
+    if FALLBACKS_TRIGGERED:
+        print("\n[WARNING] Fallback routes were triggered (OSRM/OTP servers were down).")
+        print("[WARNING] Results are statistically inaccurate and WILL NOT be logged to the CSV.")
+    else:
+        log_experiment_results(log_payload)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Multi-run Monte Carlo simulation for university student mobility & CO2 emissions.")

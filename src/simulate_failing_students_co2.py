@@ -156,28 +156,34 @@ def preload_postcode_routes(postcodes_to_cache):
         
         coord = local_postcodes[clean_tk]
         lat, lon = coord['lat'], coord['lon']
+        is_fallback = False
         
         # 1. Car route
         osrm_car = fetch_osrm_route(5000, "driving", lat, lon, DEST_LAT, DEST_LON)
         if not osrm_car:
             d_hav = haversine_km(lat, lon, DEST_LAT, DEST_LON)
             osrm_car = {'dist_km': d_hav * 1.35, 'dur_min': (d_hav * 1.35 / 35.0) * 60.0}
+            is_fallback = True
             
         # 2. Foot route
         osrm_foot = fetch_osrm_route(5001, "foot", lat, lon, DEST_LAT, DEST_LON)
         if not osrm_foot:
             d_hav = haversine_km(lat, lon, DEST_LAT, DEST_LON)
             osrm_foot = {'dist_km': d_hav * 1.25, 'dur_min': (d_hav * 1.25 / 4.8) * 60.0}
+            is_fallback = True
             
         # 3. Transit route
         otp_itins = fetch_otp_transit_routes(lat, lon, DEST_LAT, DEST_LON)
+        if not otp_itins:
+            is_fallback = True
         
         return clean_tk, {
             'lat': lat,
             'lon': lon,
             'car': osrm_car,
             'foot': osrm_foot,
-            'otp': otp_itins
+            'otp': otp_itins,
+            'is_fallback': is_fallback
         }
 
     start_t = time.time()

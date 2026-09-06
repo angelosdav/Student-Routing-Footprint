@@ -740,13 +740,13 @@ def run_monte_carlo_experiments(num_runs=1000, min_grade=0.0, max_grade=2.0, max
     print("=" * 75)
     print(f"{'Student Archetype':<26} | {'Sample %':<10} | {'Mean Attempts/Course':<20} | {'Mean CO2/Student':<16}")
     print("-" * 75)
-    skill_pcts = {
-        "Apathetic (-0.10)": "20%",
-        "Below Average (-0.05)": "25%",
-        "Average (0.00)": "30% (Mode)",
-        "Above Average (+0.05)": "15%",
-        "Excellent (+0.10)": "10%"
-    }
+    total_failing = len(students_map)
+    skill_counts = {k: 0 for k in ["Apathetic (-0.10)", "Below Average (-0.05)", "Average (0.00)", "Above Average (+0.05)", "Excellent (+0.10)"]}
+    for s in students_map.values():
+        if s.get('failed_courses'):
+            skill_counts[s['skill_class']] += 1
+    
+    skill_pcts = {k: f"{(v / total_failing)*100:.1f}%" if total_failing > 0 else "0.0%" for k, v in skill_counts.items()}
     for s_class in ["Apathetic (-0.10)", "Below Average (-0.05)", "Average (0.00)", "Above Average (+0.05)", "Excellent (+0.10)"]:
         if skill_co2_kg[s_class]:
             att_stat = calculate_distribution_stats(skill_attempts[s_class])

@@ -75,11 +75,11 @@ The system generates grades using a calibrated exponential distribution tuned vi
 ### Student Performance & Severity Matrix (The 3×3 Framework)
 Rather than relying on static a-priori archetypes, the simulation categorizes examination outcomes dynamically across course difficulty tiers based on empirical grade distributions from institutional records:
 
-| Course Difficulty | 🔴 Bad (Severe Failure / Apathy) | 🟡 Average (Marginal / Effort) | 🟢 Good (Proficiency / High Pass) |
+| Course Difficulty | Low-Performing (Severe Failure / Disengagement) | Moderate-Performing (Marginal / Effort) | High-Performing (Proficiency / High Pass) |
 |---|:---:|:---:|:---:|
-| **Hard** *(e.g., Accounting, Stats)* | 0.0 – 1.0 | 1.1 – 3.9 | 4.0 – 10.0 |
-| **Medium** *(e.g., Microeconomics)* | 0.0 – 2.0 | 2.1 – 5.5 | 5.6 – 10.0 |
-| **Easy** *(e.g., MIS, Macroeconomics)* | 0.0 – 4.9 | 5.0 – 7.0 | 7.1 – 10.0 |
+| **Hard** | 0.0 – 1.0 | 1.1 – 3.9 | 4.0 – 10.0 |
+| **Medium** | 0.0 – 2.0 | 2.1 – 5.5 | 5.6 – 10.0 |
+| **Easy** | 0.0 – 4.9 | 5.0 – 7.0 | 7.1 – 10.0 |
 
 *Note: For Easy courses, the lower bound is strictly capped at 4.9 as passing students ($\ge 5.0$) do not generate surplus re-examination travel.*
 
@@ -92,7 +92,7 @@ During re-examination rounds, a student's effective ability is dynamically modif
 $$Effective\ a_{\text{attempt}} = a_{\text{base}} + skill + PrepBoost + (attempt - 1) \cdot LearningRate + \Delta_{\text{behavior}}$$
 
 Where $\Delta_{\text{behavior}}$ models study engagement and recovery:
-- **Apathy Penalty ($\Delta = -0.18$)**: Applied to severe failures (grades 0.0–1.0), modeling persistent disengagement and resulting in an empirical average of ~3.7 examination takes per course.
+- **Disengagement Penalty ($\Delta = -0.18$)**: Applied to severe failures (grades 0.0–1.0), modeling persistent disengagement and resulting in an empirical average of ~3.7 examination takes per course.
 - **Effort Boost ($\Delta = +0.20$)**: Applied to marginal failures, modeling targeted study effort that produces rapid recovery (~1.8 average takes).
 - **Proficiency Boost ($\Delta = +0.40$)**: Applied to high-performing students who face isolated difficulties in hard courses (~1.02 average takes).
 
@@ -156,8 +156,8 @@ The full end-to-end execution follows this step-by-step stochastic workflow:
 ### 1. Clone the repository
 
 ```bash
-git clone <repository-url>
-cd <repository-directory>
+git clone https://github.com/angelosdav/Student-Routing-Footprint
+cd Student-Routing-Footprint
 ```
 
 ### 2. Start the Docker Containers (Routing APIs)

@@ -3,11 +3,14 @@ import json
 import math
 import random
 import os
+import sys
 import requests
 import argparse
 import time
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+
+sys.stdout.reconfigure(encoding='utf-8')
 
 # Import grade distribution and random choice functions from grade_model
 from grade_model import generate_course_distribution
@@ -188,16 +191,22 @@ def preload_postcode_routes(postcodes_to_cache):
 
     start_t = time.time()
     global FALLBACKS_TRIGGERED
+    fallback_count = 0
     with ThreadPoolExecutor(max_workers=16) as executor:
         results = executor.map(cache_single_tk, postcodes_to_cache)
         for tk, data in results:
             if data:
                 POSTCODE_CACHE[tk] = data
                 if data.get('is_fallback', False):
-                    FALLBACKS_TRIGGERED = True
+                    fallback_count += 1
                 
+    # Allow up to 5% peripheral fallback (e.g. Lavrio, Megara with no local urban bus) before triggering guard
+    total_tks = len(postcodes_to_cache)
+    if total_tks > 0 and (fallback_count / total_tks) > 0.05:
+        FALLBACKS_TRIGGERED = True
+
     elapsed = time.time() - start_t
-    print(f" -> Successfully cached {len(POSTCODE_CACHE)} postcodes in {elapsed:.2f}s.\n")
+    print(f" -> Successfully cached {len(POSTCODE_CACHE)} postcodes in {elapsed:.2f}s (Fallbacks: {fallback_count}/{total_tks}).\n")
 
 def compute_student_leg_fast(clean_tk, is_peak=True, reverse=False, go_mode_id=None, is_driver=False):
     """Calculates one trip leg using in-memory cached routes and stochastic MNL logic."""

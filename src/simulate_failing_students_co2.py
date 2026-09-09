@@ -429,18 +429,18 @@ def load_failing_students(min_grade=0.0, max_grade=10.0, dataset_path=DATASET_PA
 
 def classify_severity(grade, tier):
     if tier == "Hard":
-        if grade <= 1.0: return "Bad Students (Κακοί)"
-        elif grade <= 3.9: return "Average Students (Μέτριοι)"
-        else: return "Good Students (Καλοί)"
+        if grade <= 1.0: return "Bad Students"
+        elif grade <= 3.9: return "Average Students"
+        else: return "Good Students"
     elif tier == "Medium":
-        if grade <= 2.0: return "Bad Students (Κακοί)"
-        elif grade <= 5.5: return "Average Students (Μέτριοι)"
-        else: return "Good Students (Καλοί)"
+        if grade <= 2.0: return "Bad Students"
+        elif grade <= 5.5: return "Average Students"
+        else: return "Good Students"
     elif tier == "Easy":
-        if grade <= 4.9: return "Bad Students (Κακοί)"
-        elif grade <= 7.0: return "Average Students (Μέτριοι)"
-        else: return "Good Students (Καλοί)"
-    return "Average Students (Μέτριοι)"
+        if grade <= 4.9: return "Bad Students"
+        elif grade <= 7.0: return "Average Students"
+        else: return "Good Students"
+    return "Average Students"
 
 def run_single_simulation(students_map, max_retakes=6, learning_rate=0.05):
     """
@@ -458,9 +458,9 @@ def run_single_simulation(students_map, max_retakes=6, learning_rate=0.05):
     }
     
     severity_stats = {
-        "Bad Students (Κακοί)": {'count': 0, 'co2': 0.0, 'productive_co2': 0.0, 'attempts': 0},
-        "Average Students (Μέτριοι)": {'count': 0, 'co2': 0.0, 'productive_co2': 0.0, 'attempts': 0},
-        "Good Students (Καλοί)": {'count': 0, 'co2': 0.0, 'productive_co2': 0.0, 'attempts': 0}
+        "Bad Students": {'count': 0, 'co2': 0.0, 'productive_co2': 0.0, 'attempts': 0},
+        "Average Students": {'count': 0, 'co2': 0.0, 'productive_co2': 0.0, 'attempts': 0},
+        "Good Students": {'count': 0, 'co2': 0.0, 'productive_co2': 0.0, 'attempts': 0}
     }
     
     for sid, s_info in students_map.items():
@@ -482,7 +482,7 @@ def run_single_simulation(students_map, max_retakes=6, learning_rate=0.05):
             sev = classify_severity(initial_grade, tier)
             severity_stats[sev]['count'] += 1
             
-            # 1. Mandatory initial 1st take (Σκόπιμο CO2)
+            # 1. Mandatory initial 1st take (Base Productive CO2)
             go_init = compute_student_leg_fast(tk, is_peak=True, reverse=False)
             ret_init = compute_student_leg_fast(
                 tk, is_peak=False, reverse=True, 
@@ -546,11 +546,11 @@ def run_single_simulation(students_map, max_retakes=6, learning_rate=0.05):
                 
                 # Thesis Alignment: Force the simulation to reflect that 'Bad Students' (apathetic) 
                 # fail significantly more often than 'Average Students' (who try), across ALL courses.
-                if sev == "Bad Students (Κακοί)":
+                if sev == "Bad Students":
                     effective_a -= 0.18  # Perfectly balanced penalty (~3.4 average takes)
-                elif sev == "Average Students (Μέτριοι)":
+                elif sev == "Average Students":
                     effective_a += 0.20  # Effort boost, helping them pass faster
-                elif sev == "Good Students (Καλοί)":
+                elif sev == "Good Students":
                     effective_a += 0.40  # High proficiency boost, passing quickly on initial retake
 
                 # Add noise
@@ -706,11 +706,11 @@ def run_monte_carlo_experiments(num_runs=1000, min_grade=0.0, max_grade=10.0, ma
     tier_co2_kg   = {'Hard': [], 'Medium': [], 'Easy': []}
     
     # Severity aggregators
-    severity_attempts       = {k: [] for k in ["Bad Students (Κακοί)", "Average Students (Μέτριοι)", "Good Students (Καλοί)"]}
-    severity_wasted_co2_kg  = {k: [] for k in ["Bad Students (Κακοί)", "Average Students (Μέτριοι)", "Good Students (Καλοί)"]}
-    severity_prod_co2_kg    = {k: [] for k in ["Bad Students (Κακοί)", "Average Students (Μέτριοι)", "Good Students (Καλοί)"]}
-    severity_total_co2_kg   = {k: [] for k in ["Bad Students (Κακοί)", "Average Students (Μέτριοι)", "Good Students (Καλοί)"]}
-    severity_counts         = {k: 0 for k in ["Bad Students (Κακοί)", "Average Students (Μέτριοι)", "Good Students (Καλοί)"]}
+    severity_attempts       = {k: [] for k in ["Bad Students", "Average Students", "Good Students"]}
+    severity_wasted_co2_kg  = {k: [] for k in ["Bad Students", "Average Students", "Good Students"]}
+    severity_prod_co2_kg    = {k: [] for k in ["Bad Students", "Average Students", "Good Students"]}
+    severity_total_co2_kg   = {k: [] for k in ["Bad Students", "Average Students", "Good Students"]}
+    severity_counts         = {k: 0 for k in ["Bad Students", "Average Students", "Good Students"]}
 
     # Milestone intervals
     report_step = max(1, num_runs // 10)
@@ -794,14 +794,14 @@ def run_monte_carlo_experiments(num_runs=1000, min_grade=0.0, max_grade=10.0, ma
 
     # 3. Breakdown by Student Performance (3 Categories)
     print("=" * 105)
-    print("  3. BREAKDOWN BY STUDENT PERFORMANCE (Βασικό vs Πρόσθετο CO2 Επανεξετάσεων)")
+    print("  3. BREAKDOWN BY STUDENT PERFORMANCE (Base vs Retake Surplus CO2)")
     print("=" * 105)
-    print(f"{'Performance Category':<26} | {'Sample %':<9} | {'Mean Takes':<18} | {'Βασικό CO2':<15} | {'Πρόσθετο CO2':<16} | {'Συνολικό CO2':<15}")
+    print(f"{'Performance Category':<24} | {'Sample %':<9} | {'Mean Takes':<18} | {'Base CO2':<15} | {'Retake CO2':<16} | {'Total CO2':<15}")
     print("-" * 105)
     total_course_instances = sum(severity_counts.values())
     
     sev_pcts = {k: f"{(v / total_course_instances)*100:.1f}%" if total_course_instances > 0 else "0.0%" for k, v in severity_counts.items()}
-    for sev_class in ["Bad Students (Κακοί)", "Average Students (Μέτριοι)", "Good Students (Καλοί)"]:
+    for sev_class in ["Bad Students", "Average Students", "Good Students"]:
         if severity_total_co2_kg[sev_class]:
             att_stat     = calculate_distribution_stats(severity_attempts[sev_class])
             wasted_stat  = calculate_distribution_stats(severity_wasted_co2_kg[sev_class])
@@ -809,7 +809,7 @@ def run_monte_carlo_experiments(num_runs=1000, min_grade=0.0, max_grade=10.0, ma
             tot_stat     = calculate_distribution_stats(severity_total_co2_kg[sev_class])
             
             w_pct = (wasted_stat['mean'] / tot_stat['mean'] * 100) if tot_stat['mean'] > 0 else 0.0
-            print(f"{sev_class:<26} | {sev_pcts[sev_class]:<9} | {att_stat['mean']:>5.2f} ± {att_stat['std']:<4.2f} takes | {prod_stat['mean']:>5.2f} ± {prod_stat['std']:<4.2f} kg  | {wasted_stat['mean']:>5.2f} ± {wasted_stat['std']:<4.2f} kg   | {tot_stat['mean']:>5.2f} kg ({w_pct:>4.1f}% πρόσθετο)")
+            print(f"{sev_class:<24} | {sev_pcts[sev_class]:<9} | {att_stat['mean']:>5.2f} ± {att_stat['std']:<4.2f} takes | {prod_stat['mean']:>5.2f} ± {prod_stat['std']:<4.2f} kg  | {wasted_stat['mean']:>5.2f} ± {wasted_stat['std']:<4.2f} kg   | {tot_stat['mean']:>5.2f} kg ({w_pct:>4.1f}% surplus)")
     print("\n")
 
     # 4. Modal Split across all simulations
@@ -859,9 +859,9 @@ def run_monte_carlo_experiments(num_runs=1000, min_grade=0.0, max_grade=10.0, ma
         "Hard_Avg_Attempts": tier_mean_atts.get('Hard', 0.0),
         "Medium_Avg_Attempts": tier_mean_atts.get('Medium', 0.0),
         "Easy_Avg_Attempts": tier_mean_atts.get('Easy', 0.0),
-        "Bad_Students_Sample_pct": float(sev_pcts.get("Bad Students (Κακοί)", "0%").strip('%')),
-        "Average_Students_Sample_pct": float(sev_pcts.get("Average Students (Μέτριοι)", "0%").strip('%')),
-        "Good_Students_Sample_pct": float(sev_pcts.get("Good Students (Καλοί)", "0%").strip('%')),
+        "Bad_Students_Sample_pct": float(sev_pcts.get("Bad Students", "0%").strip('%')),
+        "Average_Students_Sample_pct": float(sev_pcts.get("Average Students", "0%").strip('%')),
+        "Good_Students_Sample_pct": float(sev_pcts.get("Good Students", "0%").strip('%')),
         "Overall_Avg_Attempts": round(overall_avg_attempts, 2),
         "Transit_Share_pct": round(mode_shares.get('transit1', 0.0) + mode_shares.get('transit2', 0.0), 1),
         "Car_Share_pct": mode_shares.get('car', 0.0),

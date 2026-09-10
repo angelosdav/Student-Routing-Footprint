@@ -72,14 +72,16 @@ Both interfaces rely on three Dockerized backend instances:
  
 The system generates grades using a calibrated exponential distribution tuned via `src/tune_coefficients.py` to match exact empirical pass rates.
 
-### Student Performance & Severity Matrix
-The simulation categorizes examination outcomes dynamically across course difficulty tiers based on empirical grade distributions:
+### Grade Boundary Overlap and Stochastic Coin Toss
+Examination outcomes on borderline marks are evaluated using stochastic fuzzy classification to eliminate arbitrary cutoffs.
 
-| Course Difficulty | Low-Performing (Severe Failure / Disengagement) | Moderate-Performing (Marginal / Effort) | High-Performing (Proficiency / High Pass) |
-|---|:---:|:---:|:---:|
-| **Hard** | 0.0 – 1.0 | 1.1 – 3.9 | 4.0 – 10.0 |
-| **Medium** | 0.0 – 2.0 | 2.1 – 5.5 | 5.6 – 10.0 |
-| **Easy** | 0.0 – 4.9 | 5.0 – 7.0 | 7.1 – 10.0 |
+| Course Difficulty | Severe Failure Category | Boundary Overlap Zone | Moderate Category | Boundary Overlap Zone | Proficiency Category |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Hard | 0.0 to 0.5 | 1.0 to 1.5 | 2.0 to 3.5 | 4.0 to 4.5 | 5.0 to 10.0 |
+| Medium | 0.0 to 1.5 | 2.0 to 2.5 | 3.0 to 5.0 | 5.5 to 6.0 | 6.5 to 10.0 |
+| Easy | 0.0 to 4.0 | 4.5 to 5.0 | 5.5 to 6.5 | 7.0 to 7.5 | 8.0 to 10.0 |
+
+When a grade falls inside an overlap zone, a 50/50 stochastic selection is executed. If selected, the student receives the upper category study boost and passes faster during re-examinations. If not selected, the student remains in the lower category. Students who achieve grades equal to or above 5.0 are considered passing and do not generate re-examination commutes.
 
 ### Student Archetypes and Examination Dynamics
 The synthetic cohort models three distinct student behavioral tiers across the academic curriculum.

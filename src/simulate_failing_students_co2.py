@@ -438,18 +438,54 @@ def load_failing_students(min_grade=0.0, max_grade=10.0, dataset_path=DATASET_PA
     return students_map
 
 def classify_severity(grade, tier):
+    """
+    Categorizes student examination outcomes into performance archetypes with stochastic 
+    overlap coin tossing at decision boundaries (RPRJ-03: Fuzzy Grade Boundaries).
+    """
+    val = round(float(grade), 1)
+    
     if tier == "Hard":
-        if grade <= 1.0: return "Bad Students"
-        elif grade <= 3.9: return "Average Students"
-        else: return "Good Students"
+        # Overlap Zone 1: [1.0 - 1.5] -> 50% Bad vs 50% Average (Upgraded to Average)
+        if 1.0 <= val <= 1.5:
+            return "Average Students" if random.random() < 0.50 else "Bad Students"
+        # Overlap Zone 2: [4.0 - 4.5] -> 50% Average vs 50% Good (Upgraded to Good)
+        elif 4.0 <= val <= 4.5:
+            return "Good Students" if random.random() < 0.50 else "Average Students"
+        elif val < 1.0:
+            return "Bad Students"
+        elif val < 4.0:
+            return "Average Students"
+        else:
+            return "Good Students"
+            
     elif tier == "Medium":
-        if grade <= 2.0: return "Bad Students"
-        elif grade <= 5.5: return "Average Students"
-        else: return "Good Students"
+        # Overlap Zone 1: [2.0 - 2.5] -> 50% Bad vs 50% Average
+        if 2.0 <= val <= 2.5:
+            return "Average Students" if random.random() < 0.50 else "Bad Students"
+        # Overlap Zone 2: [5.5 - 6.0] -> 50% Average vs 50% Good
+        elif 5.5 <= val <= 6.0:
+            return "Good Students" if random.random() < 0.50 else "Average Students"
+        elif val < 2.0:
+            return "Bad Students"
+        elif val < 5.5:
+            return "Average Students"
+        else:
+            return "Good Students"
+            
     elif tier == "Easy":
-        if grade <= 4.9: return "Bad Students"
-        elif grade <= 7.0: return "Average Students"
-        else: return "Good Students"
+        # Overlap Zone 1: [4.5 - 5.0] -> 50% Bad vs 50% Average
+        if 4.5 <= val <= 5.0:
+            return "Average Students" if random.random() < 0.50 else "Bad Students"
+        # Overlap Zone 2: [7.0 - 7.5] -> 50% Average vs 50% Good
+        elif 7.0 <= val <= 7.5:
+            return "Good Students" if random.random() < 0.50 else "Average Students"
+        elif val < 4.5:
+            return "Bad Students"
+        elif val < 7.0:
+            return "Average Students"
+        else:
+            return "Good Students"
+            
     return "Average Students"
 
 def run_single_simulation(students_map, max_retakes=6, learning_rate=0.05):

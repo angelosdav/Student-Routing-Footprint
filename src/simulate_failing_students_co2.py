@@ -385,18 +385,14 @@ def compute_student_leg_fast(clean_tk, is_peak=True, reverse=False, go_mode_id=N
     }
 
 def classify_skill(skill_val):
-    """Categorizes numeric student skill into the 5 discrete archetypes."""
+    """Categorizes numeric student skill into the 3 discrete student categories."""
     val = float(skill_val)
-    if val <= -0.075:
-        return "Apathetic (-0.10)"
-    elif val <= -0.025:
-        return "Below Average (-0.05)"
-    elif val <= 0.025:
-        return "Average (0.00)"
-    elif val <= 0.075:
-        return "Above Average (+0.05)"
+    if val < -0.03:
+        return "Bad Students"
+    elif val <= 0.03:
+        return "Average Students"
     else:
-        return "Excellent (+0.10)"
+        return "Good Students"
 
 def load_failing_students(min_grade=0.0, max_grade=10.0, dataset_path=DATASET_PATH):
     """Reads synthetic_students.csv and extracts students with severe failures."""
@@ -524,21 +520,19 @@ def run_single_simulation(students_map, max_retakes=6, learning_rate=0.05):
                 mode_counts[ret_res['mode_id']] += 1
                 
                 # Simulate the exam retake grade
-                # Experience/Preparation boost: Scales dynamically with the student's study archetype
+                # Experience/Preparation boost: Scales dynamically with the 3 student categories
                 # Base rates are centered around default learning_rate = 0.05
-                base_tier_rates = {
-                    "Apathetic (-0.10)": 0.02,
-                    "Below Average (-0.05)": 0.04,
-                    "Average (0.00)": 0.06,
-                    "Above Average (+0.05)": 0.10,
-                    "Excellent (+0.10)": 0.18
+                base_category_rates = {
+                    "Bad Students": 0.03,
+                    "Average Students": 0.06,
+                    "Good Students": 0.14
                 }
                 # Scale multiplier: ratio of CLI learning_rate to base default 0.05
                 scale_factor = (learning_rate / 0.05) if learning_rate > 0 else 0.0
-                boost_rate = base_tier_rates.get(s_class, 0.05) * scale_factor
+                boost_rate = base_category_rates.get(s_class, 0.05) * scale_factor
                 
                 # First retake initial preparation boost also scales dynamically with learning_rate
-                base_prep = 0.24 if skill > 0.075 else (0.12 if skill > 0.025 else (0.05 if skill > -0.025 else 0.0))
+                base_prep = 0.20 if s_class == "Good Students" else (0.08 if s_class == "Average Students" else 0.0)
                 initial_prep_boost = base_prep * scale_factor
                 
                 # Base a from the tier

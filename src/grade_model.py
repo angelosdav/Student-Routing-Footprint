@@ -1,15 +1,27 @@
 import math
+import random
 
-def generate_course_distribution(a, gamma=0.8):
+def generate_course_distribution(
+    a, 
+    gamma=None, 
+    apply_integer_snapping=None, 
+    snapping_intensity=None, 
+    stochastic=True
+):
     """
-    Generates the probability distribution (0-100%) for all grades (0.0 to 10.0).
-    Implements the math model P(x) = C * e^(ax) and the 3 Business Rules.
+    Generates the theoretical grade probability distribution (0-100%) for grades 0.0 to 10.0.
+    Implements:
+      - Mathematical base curve P(x) = C * e^(ax)
+      - Rule 1: Integer Snapping (Stochastic rounding on failing marks < 4.0)
+      - Rule 2: Pity Pass (Stochastic evaluator generosity gamma on borderline 4.0/4.5)
+      - Rule 3: Ceiling at 10.0 (Universal scale ceiling and bonus accumulation for all courses)
+      
+    Note: Survivorship Bias (Rule 4) is modeled as a Student Agent Behavioral Dynamic 
+    (Bimodal Engagement & Mastery Commitment) at the student population layer.
     """
-    # 1. Domain (0.0, 0.5, 1.0 ... 10.0)
+    # 1. Domain (0.0, 0.5, 1.0 ... 10.0) + Theoretical grades > 10.0 for universal ceiling
     grades = [x * 0.5 for x in range(21)] 
-    
-    # For the Ceiling Spike (a>0), calculate theoretical grades >10 to aggregate them at 10
-    theoretical_grades = [x * 0.5 for x in range(21, 25)] if a > 0 else []
+    theoretical_grades = [x * 0.5 for x in range(21, 25)] # 10.5, 11.0, 11.5, 12.0
     all_grades = grades + theoretical_grades
     
     # 2. Base Probability (e^ax * C)
@@ -19,29 +31,64 @@ def generate_course_distribution(a, gamma=0.8):
     
     final_p = {x: base_p.get(x, 0.0) for x in grades}
     
-    # 3. Apply Business Rules (Transformation)
+    # 3. Determine Evaluator Characteristics (Stochastic Profile)
+    if stochastic:
+        # Rule 1: Integer Snapping probability based on course difficulty
+        if apply_integer_snapping is None:
+            if a <= -0.10: # Hard courses (high volume of weak papers)
+                p_snap = 0.80
+            elif a <= 0.0: # Medium courses
+                p_snap = 0.50
+            else: # Easy courses (rarely encounters < 4.0)
+                p_snap = 0.20
+            apply_integer_snapping = (random.random() < p_snap)
+            
+        if snapping_intensity is None:
+            snapping_intensity = random.uniform(0.60, 1.0) if apply_integer_snapping else 0.0
+            
+        # Rule 2: Pity Pass generosity gamma
+        if gamma is None:
+            # 20% Strict, 60% Typical, 20% Generous
+            evaluator_type = random.choices(["strict", "typical", "generous"], weights=[20, 60, 20])[0]
+            if evaluator_type == "strict":
+                gamma = random.uniform(0.25, 0.50)
+            elif evaluator_type == "typical":
+                gamma = random.uniform(0.70, 0.85)
+            else: # generous
+                gamma = random.uniform(0.85, 0.98)
+    else:
+        # Deterministic default fallback
+        if apply_integer_snapping is None:
+            apply_integer_snapping = True
+        if snapping_intensity is None:
+            snapping_intensity = 1.0
+        if gamma is None:
+            gamma = 0.80
+
+    # 4. Apply Evaluator Rules
     
-    # Rule 1: Integer Snapping (Decimals under 4.0 are zeroed and distributed to neighbor integers)
-    for decimal in [0.5, 1.5, 2.5, 3.5]:
-        integer_below = decimal - 0.5
-        integer_above = decimal + 0.5
-        val = final_p[decimal]
-        final_p[decimal] = 0.0
-        final_p[integer_below] += val / 2.0
-        final_p[integer_above] += val / 2.0
+    # Rule 1: Integer Snapping (Professor avoids decimal precision on weak exams < 4.0)
+    if apply_integer_snapping and snapping_intensity > 0:
+        for decimal in [0.5, 1.5, 2.5, 3.5]:
+            integer_below = decimal - 0.5
+            integer_above = decimal + 0.5
+            val = final_p[decimal] * snapping_intensity
+            final_p[decimal] -= val
+            final_p[integer_below] += val / 2.0
+            final_p[integer_above] += val / 2.0
+            
+    # Rule 2: Pity Pass (Professor generously pushes borderline 4.0 and 4.5 papers to 5.0)
+    if gamma > 0:
+        pity_transfer_40 = final_p[4.0] * gamma
+        pity_transfer_45 = final_p[4.5] * gamma
+        final_p[4.0] -= pity_transfer_40
+        final_p[4.5] -= pity_transfer_45
+        final_p[5.0] += (pity_transfer_40 + pity_transfer_45)
         
-    # Rule 2: Pity Pass (80% of those getting 4.0 and 4.5 are transferred to 5.0)
-    pity_transfer_40 = final_p[4.0] * gamma
-    pity_transfer_45 = final_p[4.5] * gamma
-    final_p[4.0] -= pity_transfer_40
-    final_p[4.5] -= pity_transfer_45
-    final_p[5.0] += (pity_transfer_40 + pity_transfer_45)
+    # Rule 3: Ceiling at 10.0 (Universal scale boundary and bonus accumulation for all courses)
+    tail_sum = sum(base_p[x] for x in theoretical_grades)
+    final_p[10.0] += tail_sum
     
-    # Rule 3: Ceiling Spike (For easy courses, the >10 tail is accumulated into 10.0)
-    if a > 0:
-        tail_sum = sum(base_p[x] for x in theoretical_grades)
-        final_p[10.0] += tail_sum
-        
     return final_p
 
 def print_distribution(a_value, course_name):

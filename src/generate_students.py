@@ -11,68 +11,99 @@ POSTCODES_PATH = os.path.join(BASE_DIR, 'data', 'postcodes_attica.json')
 OUTPUT_CSV_PATH = os.path.join(BASE_DIR, 'data', 'synthetic_students.csv')
 
 COURSES = [
-    {"name": "COURSE_SEM1_MEDIUM", "a": -0.08},
-    {"name": "COURSE_SEM2_MEDIUM", "a": -0.02},
-    {"name": "COURSE_SEM2_HARD",   "a": -0.14},
-    {"name": "COURSE_SEM2_EASY",   "a": 0.33},
-    {"name": "COURSE_SEM4_HARD",   "a": -0.32},
-    {"name": "COURSE_SEM4_EASY",   "a": 0.15}
+    {"name": "COURSE_SEM1_MEDIUM", "a": -0.08, "tier": "Medium"},
+    {"name": "COURSE_SEM2_MEDIUM", "a": -0.02, "tier": "Medium"},
+    {"name": "COURSE_SEM2_HARD",   "a": -0.14, "tier": "Hard"},
+    {"name": "COURSE_SEM2_EASY",   "a": 0.33,  "tier": "Easy"},
+    {"name": "COURSE_SEM4_HARD",   "a": -0.32, "tier": "Hard"},
+    {"name": "COURSE_SEM4_EASY",   "a": 0.15,  "tier": "Easy"}
 ]
+
+STUDENT_CATEGORIES = {
+    "Bad Students": {
+        "skill_val": -0.08,
+        "weight": 25,
+        "commit_prob_hard_sem4": 0.02,
+        "commit_prob_hard_sem2": 0.05
+    },
+    "Average Students": {
+        "skill_val": 0.00,
+        "weight": 50,
+        "commit_prob_hard_sem4": 0.15,
+        "commit_prob_hard_sem2": 0.30
+    },
+    "Good Students": {
+        "skill_val": 0.08,
+        "weight": 25,
+        "commit_prob_hard_sem4": 0.55,
+        "commit_prob_hard_sem2": 0.70
+    }
+}
 
 def load_postcodes():
     """Loads the Attica postcodes from the JSON file."""
     with open(POSTCODES_PATH, 'r', encoding='utf-8') as f:
         return list(json.load(f).keys())
 
-def get_random_skill():
+def get_random_student_category():
     """
-    Assigns a skill level based on 5 discrete categories.
-    - Apathetic (-0.10): 20% probability
-    - Below Average (-0.05): 25% probability
-    - Average (0.0): 30% probability (The majority / Mode)
-    - Above Average (+0.05): 15% probability
-    - Excellent (+0.10): 10% probability
-    Total Negative: 45% | Total Positive: 25% (Left-Skewed distribution)
+    Assigns a student performance/behavior category based on the 3 discrete categories:
+    - Bad Students (-0.08): 25% probability
+    - Average Students (0.00): 50% probability (The majority / Mode)
+    - Good Students (+0.08): 25% probability
     """
-    categories = [-0.10, -0.05, 0.0, 0.05, 0.10]
-    weights = [20, 25, 30, 15, 10]
+    cat_names = list(STUDENT_CATEGORIES.keys())
+    weights = [STUDENT_CATEGORIES[c]["weight"] for c in cat_names]
+    chosen_cat = random.choices(cat_names, weights=weights, k=1)[0]
     
-    # Pick category based on weights
-    base_skill = random.choices(categories, weights=weights, k=1)[0]
-    
-    # Add minimal uniform noise (+/- 0.02) so not everyone has the exact same decimal
+    base_skill = STUDENT_CATEGORIES[chosen_cat]["skill_val"]
     noise = random.uniform(-0.02, 0.02)
-    final_skill = base_skill + noise
+    final_skill = max(-0.10, min(0.10, base_skill + noise))
     
-    # Strict boundaries
-    return max(-0.10, min(0.10, final_skill))
+    return chosen_cat, final_skill
 
 def pick_grade_for_distribution(dist):
     """Picks a random grade based on the weighted probability distribution."""
     grades = list(dist.keys())
     weights = list(dist.values())
-    # random.choices returns a list, so we take the first element [0]
     return random.choices(grades, weights=weights, k=1)[0]
 
 def generate_dataset(num_students=300):
     tks = load_postcodes()
     dataset = []
 
-    print(f"Generating {num_students} synthetic students with uniform postcode distribution...")
+    print(f"Generating {num_students} synthetic students with 3 Performance Categories (Bad, Average, Good)...")
     
     for student_id in range(1, num_students + 1):
         # 1. Uniformly pick a TK (Postcode)
         student_tk = random.choice(tks)
         
-        # 2. Assign the internal student "skill" trait
-        student_skill = get_random_skill()
+        # 2. Assign the 3-category student performance trait
+        cat_name, student_skill = get_random_student_category()
+        cat_info = STUDENT_CATEGORIES[cat_name]
         
         # 3. Simulate exams for all 6 courses
         for course in COURSES:
-            # The core logic: Course Difficulty + Student Skill
-            effective_a = course["a"] + student_skill
+            tier = course.get("tier", "Medium")
+            base_a = course["a"]
             
-            # Generate the personalized probability curve for this student
+            # Rule 4: Student Behavioral Dynamics (Survivorship Bias & Deep Study Decision across the 3 categories)
+            # In very demanding / hard courses, students bifurcate in effort:
+            # - Casual study leads to failure ([0-3]).
+            # - Deep study / mastery commitment overcomes the hurdle and leads to excellence (6.5-8.5).
+            if tier == "Hard":
+                p_commit = cat_info["commit_prob_hard_sem4"] if course["name"] == "COURSE_SEM4_HARD" else cat_info["commit_prob_hard_sem2"]
+                if random.random() < p_commit:
+                    delta_a_mastery = 0.40 if course["name"] == "COURSE_SEM4_HARD" else 0.20
+                    effective_a = base_a + student_skill + delta_a_mastery
+                else:
+                    penalty = -0.14 if course["name"] == "COURSE_SEM4_HARD" else -0.08
+                    effective_a = base_a + student_skill + penalty
+            else:
+                # Standard difficulty modulation for medium and easy courses
+                effective_a = base_a + student_skill
+            
+            # Generate the personalized probability curve for this student (applies Professor rules 1, 2, 3)
             dist = generate_course_distribution(effective_a)
             
             # Roll the loaded dice to get the grade

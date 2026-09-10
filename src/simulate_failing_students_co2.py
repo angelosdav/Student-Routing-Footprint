@@ -165,14 +165,18 @@ def preload_postcode_routes(postcodes_to_cache):
         osrm_car = fetch_osrm_route(5000, "driving", lat, lon, DEST_LAT, DEST_LON)
         if not osrm_car:
             d_hav = haversine_km(lat, lon, DEST_LAT, DEST_LON)
-            osrm_car = {'dist_km': d_hav * 1.35, 'dur_min': (d_hav * 1.35 / 35.0) * 60.0}
+            # Baseline 15.0 km/h with stochastic variance [15.0 - 18.5 km/h]
+            car_speed = 15.0 + random.uniform(0.0, 3.5)
+            osrm_car = {'dist_km': d_hav * 1.35, 'dur_min': (d_hav * 1.35 / car_speed) * 60.0}
             is_fallback = True
             
         # 2. Foot route
         osrm_foot = fetch_osrm_route(5001, "foot", lat, lon, DEST_LAT, DEST_LON)
         if not osrm_foot:
             d_hav = haversine_km(lat, lon, DEST_LAT, DEST_LON)
-            osrm_foot = {'dist_km': d_hav * 1.25, 'dur_min': (d_hav * 1.25 / 4.8) * 60.0}
+            # Baseline 4.2 km/h with stochastic variance [4.2 - 4.6 km/h]
+            foot_speed = 4.2 + random.uniform(0.0, 0.4)
+            osrm_foot = {'dist_km': d_hav * 1.25, 'dur_min': (d_hav * 1.25 / foot_speed) * 60.0}
             is_fallback = True
             
         # 3. Transit route
@@ -262,18 +266,26 @@ def compute_student_leg_fast(clean_tk, is_peak=True, reverse=False, go_mode_id=N
 
     modes = []
     
-    # Mode 1: Car
+    # Mode 1: Car (Applies stochastic speed adjustment: baseline with positive variance [0.0 - 3.5 km/h])
     if has_car or (reverse and not go_mode_id):
-        cost_car = car_dur_min + 5.0 + ASC_CAR
-        co2_car = car_dur_min * EF_CAR
-        modes.append(('car', 'Car', cost_car, co2_car, car_dur_min, 'road'))
+        # Calculate dynamic car duration considering positive speed variance
+        effective_car_speed = max(10.0, (car_dist_km / (car_dur_min / 60.0)) if car_dur_min > 0 else 15.0)
+        stoch_car_speed = effective_car_speed + random.uniform(0.0, 3.5)
+        stoch_car_dur = (car_dist_km / stoch_car_speed) * 60.0 if stoch_car_speed > 0 else car_dur_min
+        
+        cost_car = stoch_car_dur + 5.0 + ASC_CAR
+        co2_car = stoch_car_dur * EF_CAR
+        modes.append(('car', 'Car', cost_car, co2_car, stoch_car_dur, 'road'))
 
-    # Mode 2: Moto
+    # Mode 2: Moto (Applies positive speed variance [0.0 - 3.0 km/h] with lane filtering advantage)
     if has_moto or (reverse and not go_mode_id):
-        dur_moto = car_dur_min * 0.8
-        cost_moto = dur_moto + 2.0 + ASC_MOTO
-        co2_moto = dur_moto * EF_MOTO
-        modes.append(('moto', 'Motorcycle', cost_moto, co2_moto, dur_moto, 'road'))
+        effective_moto_speed = max(12.0, ((car_dist_km / (car_dur_min / 60.0)) * 1.25) if car_dur_min > 0 else 18.0)
+        stoch_moto_speed = effective_moto_speed + random.uniform(0.0, 3.0)
+        stoch_moto_dur = (car_dist_km / stoch_moto_speed) * 60.0 if stoch_moto_speed > 0 else (car_dur_min * 0.8)
+        
+        cost_moto = stoch_moto_dur + 2.0 + ASC_MOTO
+        co2_moto = stoch_moto_dur * EF_MOTO
+        modes.append(('moto', 'Motorcycle', cost_moto, co2_moto, stoch_moto_dur, 'road'))
 
     # Modes 3 & 4: Public Transit
     if otp_itins and len(otp_itins) > 0:
@@ -303,9 +315,11 @@ def compute_student_leg_fast(clean_tk, is_peak=True, reverse=False, go_mode_id=N
             t_name = "Metro + Bus" if has_rail else "Direct Bus"
             modes.append((t_id, t_name, cost_t, c_co2, dur, 'transit'))
     else:
-        # Fallback Transit
+        # Fallback Transit (Direct Bus / Regional feeder)
         d_transit = car_dist_km * 1.25
-        dur_t1 = (d_transit / 25.0) * 60.0 + 8.0
+        # Baseline 13.5 km/h with stochastic variance [13.5 - 16.0 km/h]
+        bus_speed = 13.5 + random.uniform(0.0, 2.5)
+        dur_t1 = (d_transit / bus_speed) * 60.0 + 8.0
         cost_t1 = dur_t1 + 1.2 * 5.0 + 1.5 * 5.0 + 8.0 + ASC_T1
         co2_t1 = (dur_t1 * 0.5 * EF_METRO) + (dur_t1 * 0.5 * EF_BUS)
         modes.append(('transit1', 'Metro + Bus', cost_t1, co2_t1, dur_t1, 'transit'))

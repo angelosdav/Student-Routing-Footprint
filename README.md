@@ -12,10 +12,10 @@ The system operates in two major phases:
 
 ## Features
 
-- **Mathematical Grade Modeling**: Simulates exam outcomes using an exponential probability curve ($P(x) = C \cdot e^{ax}$) tuned to empirical course difficulty.
-- **Synthetic Population Generation**: Creates realistic student profiles with a 5-tier skewed skill distribution and uniform geographic distribution across Attica.
-- **Multinomial Logit Choice Model**: Mathematically predict mode selection based on travel time, wait time, access constraints, and alternative-specific constants.
-- **Interactive Web Dashboard**: Visualize optimal routes, transport mode probabilities, and CO2 emissions between any Attica postal code and major university campuses using Leaflet.js.
+- **Mathematical Grade Modeling**: Simulates exam outcomes using an exponential probability curve ($P(x) = C \cdot e^{ax}$) tuned to empirical course difficulty with stochastic grading rules.
+- **Synthetic Population Generation**: Creates realistic student profiles with a 3-tier behavioral distribution and uniform geographic distribution across Attica.
+- **Multinomial Logit Choice Model**: Mathematically predicts mode selection based on travel time, wait time, access constraints, and alternative-specific constants.
+- **Interactive Web Dashboard**: Visualizes optimal routes, transport mode probabilities, and CO2 emissions between any Attica postal code and major university campuses using Leaflet.js.
 - **Local Routing Engine**: Uses local Dockerized OSRM and OTP instances for fast, real-world, and private public transit and driving route calculations.
 
 ## Architecture
@@ -28,7 +28,7 @@ flowchart TB
         direction LR
         A["Attica Postcodes"] -->|"Uniform"| C["300 Students"]
         B["Real Pass Rates"] -->|"Auto-Tune"| D["Course Difficulty 'a'"]
-        C -->|"5-Tier Skew"| E["Student Skill"]
+        C -->|"3-Tier Distribution"| E["Student Skill & Mastery"]
         D --> F["Effective 'a' = a + skill"]
         E --> F
         F -->|"P(x) = C · e^(ax)"| G[("synthetic_students.csv\n(1,800 records)")]
@@ -36,7 +36,7 @@ flowchart TB
 
     subgraph Phase2["Phase 2: Mobility & CO2 Emission Simulation"]
         direction LR
-        H{"Grade ≤ 2.0?"} -->|"Fail"| J["Group by Student"]
+        H{"Grade Filter"} -->|"Cohort"| J["Group by Student"]
         J --> K["Query Routing APIs"]
         K --> L["OSRM: Car & Walk\n(Ports 5000/5001)"]
         K --> M["OTP: Public Transit\n(Port 8080)"]
@@ -45,7 +45,7 @@ flowchart TB
         N --> O["Calculate Trip CO2\n(Peak / Off-Peak / Lifts)"]
     end
 
-    G ====>|"Ingest Failing Students"| H
+    G ====>|"Ingest Students"| H
     O ====> P((("Total Environmental Footprint Report")))
 
     classDef blueBox fill:#e1f0ff,stroke:#1d4ed8,stroke-width:2px,color:#1e3a8a,font-size:14px;
@@ -59,8 +59,8 @@ flowchart TB
     class P darkOut;
 ```
 
-1. **Grade & Student Engine (Python)**: `src/generate_students.py` and `src/grade_model.py` handle the creation of the synthetic dataset (`data/synthetic_students.csv`) by combining empirical course difficulty with randomized student skills.
-2. **Backend Simulation (Python)**: `src/simulate_failing_students_co2.py` reads the synthetic dataset, groups failed exams by student, queries the routing APIs, applies the MNL model, and outputs a detailed CLI report of the aggregated CO2 emissions.
+1. **Grade & Student Engine (Python)**: `src/generate_students.py` and `src/grade_model.py` handle the creation of the synthetic dataset (`data/synthetic_students.csv`) by combining empirical course difficulty with student performance categories.
+2. **Backend Simulation (Python)**: `src/simulate_failing_students_co2.py` reads the synthetic dataset, groups exams by student, queries the routing APIs, applies the MNL model, and outputs a detailed CLI report of the aggregated CO2 emissions.
 3. **Frontend (Web App)**: `frontend/index.html` provides a UI to visualize routes, MNL probabilities, and CO2 for individual journeys.
 
 Both interfaces rely on three Dockerized backend instances:
@@ -70,10 +70,10 @@ Both interfaces rely on three Dockerized backend instances:
 
 ## Core Logic: Grading Engine
  
-The system generates grades using a calibrated exponential distribution tuned via `src/tune_coefficients.py` to match exact empirical pass rates (e.g., Management Accounting ~25%, Macroeconomics ~95%).
- 
-### Student Performance & Severity Matrix (The 3×3 Framework)
-Rather than relying on static a-priori archetypes, the simulation categorizes examination outcomes dynamically across course difficulty tiers based on empirical grade distributions from institutional records:
+The system generates grades using a calibrated exponential distribution tuned via `src/tune_coefficients.py` to match exact empirical pass rates.
+
+### Student Performance & Severity Matrix
+The simulation categorizes examination outcomes dynamically across course difficulty tiers based on empirical grade distributions:
 
 | Course Difficulty | Low-Performing (Severe Failure / Disengagement) | Moderate-Performing (Marginal / Effort) | High-Performing (Proficiency / High Pass) |
 |---|:---:|:---:|:---:|
@@ -81,20 +81,24 @@ Rather than relying on static a-priori archetypes, the simulation categorizes ex
 | **Medium** | 0.0 – 2.0 | 2.1 – 5.5 | 5.6 – 10.0 |
 | **Easy** | 0.0 – 4.9 | 5.0 – 7.0 | 7.1 – 10.0 |
 
-*Note: For Easy courses, the lower bound is strictly capped at 4.9 as passing students ($\ge 5.0$) do not generate surplus re-examination travel.*
+### Student Archetypes and Examination Dynamics
+The synthetic cohort models three distinct student behavioral tiers across the academic curriculum.
+
+| Student Category | Population Share | Skill Offset | Mastery Commitment Probability | Retake Learning Rate |
+|---|:---:|:---:|:---:|:---:|
+| Bad Students | 25% | -0.08 | 2% to 5% | +0.03 |
+| Average Students | 50% | 0.00 | 15% to 30% | +0.06 |
+| Good Students | 25% | +0.08 | 55% to 70% | +0.14 |
+
+### Stochastic Grading Rules
+The evaluation engine applies three distinct grading transformations with randomized evaluator generosity.
+1. Integer Snapping rounds failing marks under 4.0 based on course difficulty.
+2. Pity Pass transfers borderline marks at 4.0 and 4.5 to 5.0 using stochastic strictness profiles.
+3. Universal Ceiling sets the upper boundary at 10.0 and aggregates theoretical bonus marks.
 
 ### Exam Probability Distribution
 $$Effective\ a = \text{Course Difficulty} (a) + \text{Student Skill}$$
 $$P(\text{grade}) = C \cdot e^{Effective\ a \cdot \text{grade}}$$
-
-### Retake Dynamics & Behavioral Progression
-During re-examination rounds, a student's effective ability is dynamically modified according to learning progression and empirical behavioral adjustments:
-$$Effective\ a_{\text{attempt}} = a_{\text{base}} + skill + PrepBoost + (attempt - 1) \cdot LearningRate + \Delta_{\text{behavior}}$$
-
-Where $\Delta_{\text{behavior}}$ models study engagement and recovery:
-- **Disengagement Penalty ($\Delta = -0.18$)**: Applied to severe failures (grades 0.0–1.0), modeling persistent disengagement and resulting in an empirical average of ~3.7 examination takes per course.
-- **Effort Boost ($\Delta = +0.20$)**: Applied to marginal failures, modeling targeted study effort that produces rapid recovery (~1.8 average takes).
-- **Proficiency Boost ($\Delta = +0.40$)**: Applied to high-performing students who face isolated difficulties in hard courses (~1.02 average takes).
 
 ## Core Logic: Mode Choice Model
 
@@ -106,12 +110,23 @@ $$C_i = t_{\text{travel}} + 1.2 \cdot t_{\text{wait}} + \text{Penalty}_{\text{tr
 ### Probability of Selection
 $$P(i) = \frac{e^{-\theta \cdot C_i}}{\sum_k e^{-\theta \cdot C_k}}$$
 
-### Emission Factors (g CO₂eq / pax-km)
-- 🚗 **Car**: 120.0
-- 🏍️ **Motorcycle**: 70.0
-- 🚌 **Bus**: 10.81
-- 🚇 **Metro**: 3.1
-- 🚶 **Walking**: 0.0
+### Emission Factors (g CO₂eq / passenger-minute)
+- 🚗 **Car**: 60.0
+- 🏍️ **Motorcycle**: 40.8
+- 🚌 **Bus**: 3.60
+- 🚇 **Metro**: 1.74
+- 🚶 **Walking**: 0.00
+
+### Urban Routing Speeds and Stochastic Variance
+Travel durations incorporate congested peak hour conditions alongside a positive stochastic variance to model artery access and signal coordination.
+
+| Transport Mode | Baseline Speed | Stochastic Variance | Effective Speed Range |
+|---|:---:|:---:|:---:|
+| 🚗 Car | 15.0 km/h | + Uniform(0.0, 3.5) km/h | 15.0 to 18.5 km/h |
+| 🏍️ Motorcycle | 18.0 km/h | + Uniform(0.0, 3.0) km/h | 18.0 to 21.0 km/h |
+| 🚌 Bus | 13.5 km/h | + Uniform(0.0, 2.5) km/h | 13.5 to 16.0 km/h |
+| 🚇 Metro | 35.0 km/h | Constant | 35.0 km/h |
+| 🚶 Walking | 4.2 km/h | + Uniform(0.0, 0.4) km/h | 4.2 to 4.6 km/h |
 
 ## Simulation Pipeline
 

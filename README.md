@@ -157,7 +157,7 @@ The full end-to-end execution follows this step-by-step stochastic workflow:
 
 ## Data & Configuration
 
-- **`data/postcodes_attica.json`**: Local geocoding fallback mapping 301 mainland Attica postal codes to coordinates.
+- **`data/postcodes_attica.json`**: Local geocoding fallback mapping 301 mainland Attica postal codes to coordinates (derived from [MentatInnovations/grpostcodes](https://github.com/MentatInnovations/grpostcodes/tree/master) and OpenStreetMap).
 - **`data/synthetic_students.csv`**: Generated dataset of 1,800 exam outcomes including `STUDENT_ID`, `TK_KATOIKIA`, `COURSE`, `GRADE`, and `SKILL`.
 - **`data/experiments_log.csv`**: Persistent audit log storing statistical snapshots (Total CO2, CI95, mode splits, retake attempts, and demographic sample shares for `Bad_Students_Sample_pct`, `Average_Students_Sample_pct`, `Good_Students_Sample_pct`) for every simulation batch. *(Strictly protected by the Fallback Guard: logging is blocked if OSRM/OTP dockers are down).*
 - **`config/config.json`**: Configuration for the MNL model and simulation parameters.

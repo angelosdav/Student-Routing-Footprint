@@ -435,12 +435,12 @@
                 </select>
             </div>
             <div style="display: flex; flex-direction: column; gap: 8px; margin: 4px 0;">
-                <label style="font-size: 0.70rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted);">Vehicle Availability</label>
+                <label style="font-size: 0.70rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted);">Vehicle Availability & Passenger Context</label>
                 <div class="input-grid">
                     <div class="input-field">
                         <label>Private Car</label>
                         <select id="hasCar" onchange="calculateRoute()">
-                            <option value="unknown" selected>Don't Know</option>
+                            <option value="unknown" selected>Don't Know (20% Baseline)</option>
                             <option value="yes">Yes, I have</option>
                             <option value="no">No, I don't</option>
                         </select>
@@ -448,11 +448,19 @@
                     <div class="input-field">
                         <label>Motorcycle</label>
                         <select id="hasMoto" onchange="calculateRoute()">
-                            <option value="unknown" selected>Don't Know</option>
+                            <option value="unknown" selected>Don't Know (15% Baseline)</option>
                             <option value="yes">Yes, I have</option>
                             <option value="no">No, I don't</option>
                         </select>
                     </div>
+                </div>
+                <div class="input-field" style="margin-top: 4px;">
+                    <label>Passenger Context (CO₂ Multiplier)</label>
+                    <select id="passengerRole" onchange="calculateRoute()">
+                        <option value="1.0" selected>Solo Driver (1.0x)</option>
+                        <option value="0.5">Carpool / Shared Ride (0.5x)</option>
+                        <option value="2.0">Drop-off / Parent Escort (2.0x Round Trip)</option>
+                    </select>
                 </div>
             </div>
             <button class="btn-calc" onclick="calculateRoute()">Calculate Optimal Routes</button>
@@ -503,9 +511,9 @@
 
         const map = L.map('map').setView([37.9838, 23.7275], 13);
 
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
-            attribution: '&copy; OpenStreetMap & &copy; CARTO'
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }).addTo(map);
 
         let mapLayers = [];
@@ -597,9 +605,9 @@
             const dlambda = (end.lon - start.lon) * Math.PI / 180;
             const a = Math.sin(dphi/2)**2 + Math.cos(phi1)*Math.cos(phi2)*Math.sin(dlambda/2)**2;
             const straightKm = 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            const multiplier = (profile === 'walking') ? 1.15 : 1.25;
+            const multiplier = (profile === 'walking') ? 1.25 : 1.35;
             const distMeters = straightKm * multiplier * 1000;
-            const speedKmh = (profile === 'walking') ? 4.5 : 30.0;
+            const speedKmh = (profile === 'walking') ? 4.3 : 16.75;
             const durSeconds = (distMeters / 1000 / speedKmh) * 3600;
 
             return {
@@ -824,7 +832,9 @@
 
             const carDistKm = carRoute ? (carRoute.distance / 1000) : 2.5;
             const carDurMin = carRoute ? (carRoute.duration / 60 * carMultiplier) : (10.0 * carMultiplier);
-            const carCO2Grams = Math.round(carDurMin * EF_CAR);
+            const roleElem = document.getElementById('passengerRole');
+            const contextMultiplier = roleElem ? parseFloat(roleElem.value) : 1.0;
+            const carCO2Grams = Math.round(carDurMin * EF_CAR * contextMultiplier);
 
             const motoDistKm = carDistKm;
             const motoDurMin = carDurMin * 0.90;
@@ -1045,7 +1055,7 @@
                     html: `
                 <div class="card" id="card-car" onclick="showOnMap('car')">
                     <div class="card-header">
-                        <span class="mode-title">Private Car</span>
+                        <span class="mode-title">Private Car (${contextMultiplier === 0.5 ? 'Carpool 0.5x' : (contextMultiplier === 2.0 ? 'Drop-off 2.0x' : 'Solo')})</span>
                         <span class="card-badge">Logit: ${pctCar}% P(i)</span>
                     </div>
                     <div class="card-metrics">

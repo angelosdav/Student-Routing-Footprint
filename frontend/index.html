@@ -493,11 +493,40 @@
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
+        const UNIVERSITY_DESTINATIONS = {
+            "12244": { name: "ΠΑΔΑ - Αρχαίος Ελαιώνας", lat: 37.9772, lon: 23.6743, campus: "Campus 2 (Θηβών 250 & Π. Ράλλη)" },
+            "12243": { name: "ΠΑΔΑ - Άλσος Αιγάλεω", lat: 38.0035, lon: 23.6755, campus: "Campus 1 (Αγίου Σπυρίδωνος 28)" },
+            "11521": { name: "ΠΑΔΑ - Αμπελόκηποι (ΕΣΔΥ)", lat: 37.9885, lon: 23.7610, campus: "Λεωφ. Αλεξάνδρας 196" },
+            
+            "15784": { name: "ΕΚΠΑ - Πανεπιστημιούπολη Ζωγράφου", lat: 37.9685, lon: 23.7665, campus: "Πανεπιστημιούπολη (Κεντρική Πύλη)" },
+            "11527": { name: "ΕΚΠΑ - Γουδή (Ιατρική)", lat: 37.9858, lon: 23.7712, campus: "Μικράς Ασίας 75, Γουδή" },
+            "10679": { name: "ΕΚΠΑ - Κέντρο (Προπύλαια / Νομική)", lat: 37.9806, lon: 23.7345, campus: "Πανεπιστημίου 30 & Σόλωνος 57" },
+            "17237": { name: "ΕΚΠΑ - Δάφνη (ΣΕΦΑΑ)", lat: 37.9482, lon: 23.7445, campus: "Εθνικής Αντιστάσεως 41, Δάφνη" },
+
+            "15780": { name: "ΕΜΠ - Πολυτεχνειούπολη Ζωγράφου", lat: 37.9775, lon: 23.7830, campus: "Ηρώων Πολυτεχνείου 9, Ζωγράφου" },
+            "10682": { name: "ΕΜΠ - Πατησίων", lat: 37.9880, lon: 23.7315, campus: "Πατησίων 42 (Ιστορικό Συγκρότημα)" },
+
+            "10434": { name: "ΟΠΑ (ΑΣΟΕΕ) - Πατησίων", lat: 37.9940, lon: 23.7320, campus: "Πατησίων 76 (Κεντρικό Κτίριο)" },
+            "11362": { name: "ΟΠΑ - Ευελπίδων", lat: 37.9965, lon: 23.7390, campus: "Ευελπίδων 47 (Μεταπτυχιακά)" },
+            "11257": { name: "ΟΠΑ - Τροίας", lat: 37.9972, lon: 23.7340, campus: "Τροίας 2 & Σπετσών" },
+
+            "18534": { name: "ΠΑΠΕΙ - Πειραιάς (Κεντρικό)", lat: 37.9416, lon: 23.6528, campus: "Μ. Καραολή & Α. Δημητρίου 80" },
+            "18532": { name: "ΠΑΠΕΙ - Γρ. Λαμπράκη", lat: 37.9465, lon: 23.6515, campus: "Γρ. Λαμπράκη 126" },
+
+            "17121": { name: "Πάντειον Πανεπιστήμιο", lat: 37.9608, lon: 23.7176, campus: "Λεωφ. Συγγρού 136, Καλλιθέα" },
+            "11855": { name: "Γεωπονικό Πανεπιστήμιο (Βοτανικός)", lat: 37.9840, lon: 23.7055, campus: "Ιερά Οδός 75, Βοτανικός" },
+            "17676": { name: "Χαροκόπειο Πανεπιστήμιο", lat: 37.9615, lon: 23.7085, campus: "Ελ. Βενιζέλου 70, Καλλιθέα" },
+            "18233": { name: "ΑΣΚΤ (Ταύρος)", lat: 37.9692, lon: 23.6935, campus: "Πειραιώς 256, Ταύρος" },
+            "10105": { name: "Σχολή Ικάρων", lat: 38.1150, lon: 23.7780, campus: "Αεροπορική Βάση Δεκελείας / Τατόι" },
+            "18539": { name: "Σχολή Ναυτικών Δοκίμων", lat: 37.9280, lon: 23.6330, campus: "Τέρμα Χατζηκυριάκου, Πειραιάς" },
+            "16673": { name: "Στρατιωτική Σχολή Ευελπίδων", lat: 37.8420, lon: 23.7990, campus: "Λεωφ. Βάρης-Κορωπίου, Βάρη" }
+        };
+
         const KNOWN_STATIONS = {
             "12241": { area: "Egaleo Campus 2", busStop: "OSY Stop 'UNIWA Campus 2'", metroStation: "Metro Station 'Egaleo' (Line 3)" },
             "12242": { area: "Egaleo Center", busStop: "OSY Stop 'Egaleo City Hall'", metroStation: "Metro Station 'Egaleo' (Line 3)" },
             "12243": { area: "Egaleo North", busStop: "OSY Stop 'Egaleo Bridge'", metroStation: "Metro Station 'Agia Marina' (Line 3)" },
-            "12244": { area: "Egaleo Lioumi", busStop: "OSY Stop 'Lioumi Square'", metroStation: "Metro Station 'Agia Marina' (Line 3)" },
+            "12244": { area: "Egaleo Campus 2", busStop: "OSY Stop 'UNIWA Campus 2'", metroStation: "Metro Station 'Agia Marina' (Line 3)" },
             "12461": { area: "Haidari", busStop: "OSY Stop 'Haidari Bridge'", metroStation: "Metro Station 'Agia Marina' (Line 3)" },
             "15124": { area: "Marousi", busStop: "OSY Stop 'Marousi Square'", metroStation: "Metro/ISAP Station 'Marousi' (Line 1)" },
             "17343": { area: "Agios Dimitrios", busStop: "OSY Stop 'Ag. Dimitrios Station'", metroStation: "Metro Station 'Agios Dimitrios' (Line 2)" },
@@ -506,10 +535,10 @@
         };
 
         const KNOWN_COORDS = {
-            "12241": { lat: 37.9857, lon: 23.6792 },
+            "12241": { lat: 37.9772, lon: 23.6743 },
             "12242": { lat: 37.9920, lon: 23.6800 },
-            "12243": { lat: 37.9984, lon: 23.6728 },
-            "12244": { lat: 37.9904, lon: 23.6816 },
+            "12243": { lat: 38.0035, lon: 23.6755 },
+            "12244": { lat: 37.9772, lon: 23.6743 },
             "12461": { lat: 38.0086, lon: 23.6633 },
             "15124": { lat: 38.0515, lon: 23.8040 },
             "17343": { lat: 37.9395, lon: 23.7383 },
@@ -543,8 +572,17 @@
             })
             .catch(err => console.error("Could not load local postcodes:", err));
 
-        async function geocode(tk) {
+        async function geocode(tk, isDestination = false) {
             const cleanTk = tk.trim();
+            if (isDestination && UNIVERSITY_DESTINATIONS[cleanTk]) {
+                return { 
+                    lat: UNIVERSITY_DESTINATIONS[cleanTk].lat, 
+                    lon: UNIVERSITY_DESTINATIONS[cleanTk].lon, 
+                    tk: cleanTk,
+                    name: UNIVERSITY_DESTINATIONS[cleanTk].name,
+                    campus: UNIVERSITY_DESTINATIONS[cleanTk].campus
+                };
+            }
             if (LOCAL_POSTCODES[cleanTk]) {
                 return { lat: LOCAL_POSTCODES[cleanTk].lat, lon: LOCAL_POSTCODES[cleanTk].lon, tk: cleanTk };
             }
@@ -771,8 +809,8 @@
             loadingState.style.display = 'block';
             resultsDiv.innerHTML = '';
 
-            const start = await geocode(tk1);
-            const end = await geocode(tk2);
+            const start = await geocode(tk1, false);
+            const end = await geocode(tk2, true);
 
             const carRoute = await fetchOSRM(5000, 'driving', start, end);
             const footRoute = await fetchOSRM(5001, 'walking', start, end);
@@ -1182,6 +1220,13 @@
 
             const bounds = L.latLngBounds([[start.lat, start.lon], [end.lat, end.lon]]);
 
+            function getDestinationLabel(tk) {
+                if (UNIVERSITY_DESTINATIONS[tk]) {
+                    return `<b>Destination:</b> ${UNIVERSITY_DESTINATIONS[tk].name}<br/><span style="font-size:0.75rem; color:#94a3b8;">${UNIVERSITY_DESTINATIONS[tk].campus}</span>`;
+                }
+                return `<b>Destination:</b> TK ${tk}`;
+            }
+
             function addMarker(lat, lon, popupHtml) {
                 if (reqId !== currentMapRequestId) return;
                 const m = L.marker([lat, lon]).addTo(map).bindPopup(popupHtml);
@@ -1195,7 +1240,7 @@
                 const p = L.polyline(coords, { color: '#0284c7', weight: 6, opacity: 1.0 }).addTo(map);
                 mapLayers.push(u, p);
                 addMarker(start.lat, start.lon, `<b>Origin:</b> TK ${tk1}`);
-                addMarker(end.lat, end.lon, `<b>Destination:</b> TK ${tk2}`);
+                addMarker(end.lat, end.lon, getDestinationLabel(tk2));
             } 
             else if (mode === 'moto' && carRoute) {
                 if (reqId !== currentMapRequestId) return;
@@ -1204,7 +1249,7 @@
                 const p = L.polyline(coords, { color: '#d946ef', weight: 6, opacity: 1.0 }).addTo(map);
                 mapLayers.push(u, p);
                 addMarker(start.lat, start.lon, `<b>Origin:</b> TK ${tk1}`);
-                addMarker(end.lat, end.lon, `<b>Destination:</b> TK ${tk2}`);
+                addMarker(end.lat, end.lon, getDestinationLabel(tk2));
             }
             else if (mode === 'foot' && footRoute) {
                 if (reqId !== currentMapRequestId) return;
@@ -1213,7 +1258,7 @@
                 const p = L.polyline(coords, { color: '#059669', weight: 5, opacity: 1.0, dashArray: '6, 6' }).addTo(map);
                 mapLayers.push(u, p);
                 addMarker(start.lat, start.lon, `<b>Origin:</b> TK ${tk1}`);
-                addMarker(end.lat, end.lon, `<b>Destination:</b> TK ${tk2}`);
+                addMarker(end.lat, end.lon, getDestinationLabel(tk2));
             }
             else if (mode === 'transit1') {
                 if (currentRoutesData.t1_legs) {
@@ -1243,7 +1288,7 @@
                         }
                     }
                     addMarker(start.lat, start.lon, `<b>Origin:</b> TK ${tk1}`);
-                    addMarker(end.lat, end.lon, `<b>Destination:</b> TK ${tk2}`);
+                    addMarker(end.lat, end.lon, getDestinationLabel(tk2));
                 } else {
                     await drawLegOnMap(reqId, 5001, 'walking', start, busStop1, '#059669', '6, 6', 4);
                     await drawLegOnMap(reqId, 5000, 'driving', busStop1, metroStation1, '#9333ea', null, 6);
@@ -1255,7 +1300,7 @@
                     addMarker(busStop1.lat, busStop1.lon, `<b>OSY Stop: ${busStop1.name}</b><br/>Board Transit Line (Est.)`);
                     addMarker(metroStation1.lat, metroStation1.lon, `<b>Metro: ${metroStation1.name}</b><br/>Transfer to connecting Bus`);
                     addMarker(busStop2.lat, busStop2.lon, `<b>OSY Stop: ${busStop2.name}</b><br/>Walk to campus`);
-                    addMarker(end.lat, end.lon, `<b>Destination:</b> TK ${tk2}`);
+                    addMarker(end.lat, end.lon, getDestinationLabel(tk2));
                 }
             }
             else if (mode === 'transit2') {
@@ -1282,7 +1327,7 @@
                         }
                     }
                     addMarker(start.lat, start.lon, `<b>Origin:</b> TK ${tk1}`);
-                    addMarker(end.lat, end.lon, `<b>Destination:</b> TK ${tk2}`);
+                    addMarker(end.lat, end.lon, getDestinationLabel(tk2));
                 } else {
                     await drawLegOnMap(reqId, 5001, 'walking', start, busStop1, '#059669', '6, 6', 4);
                     await drawLegOnMap(reqId, 5000, 'driving', busStop1, busStop2, '#d97706', null, 6);
@@ -1292,7 +1337,7 @@
                     addMarker(start.lat, start.lon, `<b>Origin:</b> TK ${tk1}`);
                     addMarker(busStop1.lat, busStop1.lon, `<b>OSY Stop: ${busStop1.name}</b><br/>Board Transit Line (Est.)`);
                     addMarker(busStop2.lat, busStop2.lon, `<b>OSY Stop: ${busStop2.name}</b><br/>Walk to campus`);
-                    addMarker(end.lat, end.lon, `<b>Destination:</b> TK ${tk2}`);
+                    addMarker(end.lat, end.lon, getDestinationLabel(tk2));
                 }
             }
 

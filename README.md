@@ -134,7 +134,7 @@ Travel durations incorporate congested peak hour conditions alongside a positive
 
 The full end-to-end execution follows this step-by-step stochastic workflow:
 
-1. **Data Generation**: `generate_students.py` seeds 300 students uniformly across Attica postal codes, assigns their skill, and simulates 6 exams per student (1,800 total exams).
+1. **Data Generation**: `generate_students.py` seeds 300 students using a 2-Stage Hybrid Spatial Distribution (75% uniform coverage across all 301 Attica postal codes + 25% targeted cluster boost within a 5 km radius / 10 km diameter around the UNIWA campus), assigns their skill, and simulates 6 exams per student (1,800 total exams).
 2. **Cohort Ingestion & Categorization**: `simulate_failing_students_co2.py` processes student records across the complete grade spectrum (0.0 to 10.0), classifies exam outcomes into the 3×3 severity framework, and isolates the initial mandatory exam takes from repeated retakes.
 3. **Route Generation**: 
    - Queries local OSRM engines for Car and Walking routes.

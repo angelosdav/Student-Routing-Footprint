@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+    <title>Χάρτης Χωρικής Κατανομής 300 Φοιτητών</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Google Fonts: Roboto -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Roboto', 'Segoe UI', system-ui, sans-serif; background: #0b0f19; }
+        #map { width: 100vw; height: 100vh; }
+        .glass-panel {
+            position: absolute;
+            top: 20px; left: 20px; z-index: 1000;
+            background: rgba(15, 23, 42, 0.93);
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 14px;
+            padding: 22px 24px;
+            color: #f8fafc;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+            width: 380px;
+            font-family: 'Roboto', sans-serif;
+        }
+        .glass-panel h2 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-bottom: 14px;
+            color: #38bdf8;
+            letter-spacing: -0.2px;
+        }
+        .stat-badge {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 9px 14px;
+            border-radius: 8px;
+            margin: 7px 0;
+            font-size: 0.88rem;
+            border: 1px solid rgba(255,255,255,0.06);
+            font-weight: 400;
+        }
+        .stat-val { font-weight: 700; color: #fbbf24; font-size: 0.92rem; margin-left: 12px; }
+        .legend-box {
+            margin-top: 14px;
+            border-top: 1px solid rgba(255,255,255,0.12);
+            padding-top: 12px;
+        }
+        .legend-title {
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #94a3b8;
+            margin-bottom: 8px;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            font-size: 0.86rem;
+            color: #cbd5e1;
+            margin: 7px 0;
+            font-weight: 400;
+        }
+        .legend-icon-container {
+            width: 26px;
+            height: 26px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 10px;
+            flex-shrink: 0;
+        }
+        .legend-circle {
+            border-radius: 50%;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <div class="glass-panel">
+        <h2>Χωρική Κατανομή Φοιτητών</h2>
+        
+        <div class="stat-badge">
+            <span>Συνολικοί Φοιτητές:</span>
+            <span class="stat-val">300</span>
+        </div>
+        <div class="stat-badge">
+            <span>Ενεργοί Τ.Κ. Κατοικίας:</span>
+            <span class="stat-val">183</span>
+        </div>
+        <div class="stat-badge">
+            <span>Φοιτητές εντός Ακτίνας 5 km:</span>
+            <span class="stat-val">116 (38.7%)</span>
+        </div>
+        <div class="stat-badge">
+            <span>Φοιτητές εντός Ακτίνας 10 km:</span>
+            <span class="stat-val">227 (75.7%)</span>
+        </div>
+        
+        <div class="legend-box">
+            <div class="legend-title">ΕΠΕΞΗΓΗΣΗ ΚΥΚΛΩΝ:</div>
+            <div class="legend-item">
+                <div class="legend-icon-container">
+                    <span class="legend-circle" style="width: 10px; height: 10px; background: #38bdf8; border: 1px solid #0284c7;"></span>
+                </div>
+                <span>1 Φοιτητής</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-icon-container">
+                    <span class="legend-circle" style="width: 16px; height: 16px; background: #fbbf24; border: 1px solid #d97706;"></span>
+                </div>
+                <span>2-3 Φοιτητές</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-icon-container">
+                    <span class="legend-circle" style="width: 22px; height: 22px; background: #f43f5e; border: 1px solid #be123c;"></span>
+                </div>
+                <span>4+ Φοιτητές</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-icon-container">
+                    <span class="legend-circle" style="width: 16px; height: 16px; background: #22c55e; border: 2px solid white; display: flex; align-items: center; justify-content: center; font-size: 9px;">🏛️</span>
+                </div>
+                <span>Πανεπιστήμιο</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script>
+        var map = L.map('map', { zoomControl: false }).setView([38.00, 23.73], 11);
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        // ESRI World Street Map Layer
+        var esriLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19,
+            attribution: 'Tiles &copy; Esri'
+        }).addTo(map);
+
+        // 5 km Radius Circle (10 km Diameter) around University
+        var radiusCircle5km = L.circle([37.9772, 23.6743], {
+            color: '#f43f5e',
+            weight: 2.5,
+            dashArray: '5, 5',
+            fillColor: '#f43f5e',
+            fillOpacity: 0.07,
+            radius: 5000
+        }).addTo(map);
+        radiusCircle5km.bindTooltip("Ακτίνα 5 km (Διάμετρος 10 km) - Άμεση Φοιτητική Ζώνη", { sticky: true });
+
+        // 10 km Outer Radius Circle
+        var radiusCircle10km = L.circle([37.9772, 23.6743], {
+            color: '#0284c7',
+            weight: 1.5,
+            dashArray: '6, 8',
+            fillColor: '#38bdf8',
+            fillOpacity: 0.03,
+            radius: 10000
+        }).addTo(map);
+        radiusCircle10km.bindTooltip("Ευρύτερη Ακτίνα 10 km", { sticky: true });
+
+        // University Marker
+        var uniIcon = L.divIcon({
+            className: 'custom-uni-icon',
+            html: '<div style="background: #22c55e; width: 26px; height: 26px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 15px rgba(34, 197, 94, 0.9); display:flex; align-items:center; justify-content:center; font-size:14px;">🏛️</div>',
+            iconSize: [26, 26],
+            iconAnchor: [13, 13]
+        });
+        L.marker([37.9772, 23.6743], { icon: uniIcon }).addTo(map)
+            .bindPopup("<div style='font-family:Roboto,sans-serif;'><b>🏛️ ΠΑΔΑ - Πανεπιστημιούπολη Άλσους Αιγάλεω</b><br/><span style='color:#64748b; font-size:0.85rem;'>Κεντρικός Προορισμός Εξετάσεων</span></div>");
+
+        var markersData = [{"tk": "17655", "name": "Καλλιθέα", "lat": 37.955, "lon": 23.698, "dist_km": 3.23, "count": 6, "is_within_5km": true, "is_within_10km": true}, {"tk": "10440", "name": "Αθήνα (Σταθμός Λαρίσης)", "lat": 37.994, "lon": 23.7215, "dist_km": 4.54, "count": 6, "is_within_5km": true, "is_within_10km": true}, {"tk": "12133", "name": "Περιστέρι (Άγιος Ιερόθεος)", "lat": 38.022, "lon": 23.674, "dist_km": 4.98, "count": 5, "is_within_5km": true, "is_within_10km": true}, {"tk": "17122", "name": "Νέα Σμύρνη (Άνω)", "lat": 37.951, "lon": 23.722, "dist_km": 5.1, "count": 5, "is_within_5km": false, "is_within_10km": true}, {"tk": "10444", "name": "Αθήνα", "lat": 38.001, "lon": 23.709, "dist_km": 4.03, "count": 4, "is_within_5km": true, "is_within_10km": true}, {"tk": "10431", "name": "Αθήνα", "lat": 37.988, "lon": 23.725, "dist_km": 4.6, "count": 4, "is_within_5km": true, "is_within_10km": true}, {"tk": "10563", "name": "Αθήνα (Κολοκοτρώνη)", "lat": 37.978, "lon": 23.73, "dist_km": 4.88, "count": 4, "is_within_5km": true, "is_within_10km": true}, {"tk": "14341", "name": "Νέα Φιλαδέλφεια (Κέντρο)", "lat": 38.035, "lon": 23.738, "dist_km": 8.51, "count": 4, "is_within_5km": false, "is_within_10km": true}, {"tk": "13231", "name": "Πετρούπολη (Κέντρο)", "lat": 38.051, "lon": 23.715, "dist_km": 8.95, "count": 4, "is_within_5km": false, "is_within_10km": true}, {"tk": "18122", "name": "Κορυδαλλός (Ελευθερία)", "lat": 37.971, "lon": 23.682, "dist_km": 0.96, "count": 3, "is_within_5km": true, "is_within_10km": true}, {"tk": "18453", "name": "Νίκαια (Νεάπολη)", "lat": 37.985, "lon": 23.659, "dist_km": 1.6, "count": 3, "is_within_5km": true, "is_within_10km": true}, {"tk": "18233", "name": "Άγιος Ιωάννης Ρέντης", "lat": 37.965, "lon": 23.689, "dist_km": 1.87, "count": 3, "is_within_5km": true, "is_within_10km": true}, {"tk": "11855", "name": "Βοτανικός", "lat": 37.981, "lon": 23.704, "dist_km": 2.64, "count": 3, "is_within_5km": true, "is_within_10km": true}, {"tk": "10441", "name": "Αθήνα", "lat": 37.989, "lon": 23.702, "dist_km": 2.76, "count": 3, "is_within_5km": true, "is_within_10km": true}, {"tk": "11852", "name": "Πετράλωνα (Άνω)", "lat": 37.969, "lon": 23.716, "dist_km": 3.77, "count": 3, "is_within_5km": true, "is_within_10km": true}, {"tk": "10443", "name": "Αθήνα", "lat": 37.997, "lon": 23.714, "dist_km": 4.12, "count": 3, "is_within_5km": true, "is_within_10km": true}, {"tk": "18534", "name": "Πειραιάς (Καστέλλα)", "lat": 37.941, "lon": 23.661, "dist_km": 4.19, "count": 3, "is_within_5km": true, "is_within_10km": true}, {"tk": "10438", "name": "Αθήνα", "lat": 37.999, "lon": 23.719, "dist_km": 4.61, "count": 3, "is_within_5km": true, "is_within_10km": true}, {"tk": "18758", "name": "Κερατσίνι (Άνω Αμφιάλη)", "lat": 37.9678, "lon": 23.617, "dist_km": 5.13, "count": 3, "is_within_5km": false, "is_within_10km": true}, {"tk": "10673", "name": "Αθήνα (Ακαδημίας)", "lat": 37.98, "lon": 23.735, "dist_km": 5.33, "count": 3, "is_within_5km": false, "is_within_10km": true}, {"tk": "12462", "name": "Χαϊδάρι (Δάσος)", "lat": 38.0211, "lon": 23.642, "dist_km": 5.64, "count": 3, "is_within_5km": false, "is_within_10km": true}, {"tk": "10677", "name": "Αθήνα (Εξάρχεια Β.)", "lat": 37.989, "lon": 23.738, "dist_km": 5.73, "count": 3, "is_within_5km": false, "is_within_10km": true}, {"tk": "11254", "name": "Κυψέλη (Νέα)", "lat": 38.011, "lon": 23.748, "dist_km": 7.47, "count": 3, "is_within_5km": false, "is_within_10km": true}, {"tk": "16231", "name": "Βύρωνας (Κέντρο)", "lat": 37.958, "lon": 23.758, "dist_km": 7.64, "count": 3, "is_within_5km": false, "is_within_10km": true}, {"tk": "13344", "name": "Άνω Λιόσια", "lat": 38.0683, "lon": 23.705, "dist_km": 10.48, "count": 3, "is_within_5km": false, "is_within_10km": false}, {"tk": "15561", "name": "Χολαργός (Κάτω)", "lat": 37.998, "lon": 23.792, "dist_km": 10.57, "count": 3, "is_within_5km": false, "is_within_10km": false}, {"tk": "14122", "name": "Ηράκλειο (Πρασίνου Λόφου)", "lat": 38.055, "lon": 23.771, "dist_km": 12.11, "count": 3, "is_within_5km": false, "is_within_10km": false}, {"tk": "19001", "name": "Κερατέα", "lat": 37.812, "lon": 23.952, "dist_km": 30.52, "count": 3, "is_within_5km": false, "is_within_10km": false}, {"tk": "18454", "name": "Νίκαια (Χαλκηδόνα)", "lat": 37.971, "lon": 23.671, "dist_km": 0.75, "count": 2, "is_within_5km": true, "is_within_10km": true}, {"tk": "18450", "name": "Νίκαια (Κέντρο)", "lat": 37.968, "lon": 23.662, "dist_km": 1.49, "count": 2, "is_within_5km": true, "is_within_10km": true}, {"tk": "17778", "name": "Ταύρος", "lat": 37.971, "lon": 23.6917, "dist_km": 1.67, "count": 2, "is_within_5km": true, "is_within_10km": true}, {"tk": "18452", "name": "Νίκαια (Άσπρα Χώματα)", "lat": 37.979, "lon": 23.648, "dist_km": 2.31, "count": 2, "is_within_5km": true, "is_within_10km": true}, {"tk": "18541", "name": "Καμίνια (Παλαιά)", "lat": 37.962, "lon": 23.655, "dist_km": 2.39, "count": 2, "is_within_5km": true, "is_within_10km": true}, {"tk": "18346", "name": "Ταύρος", "lat": 37.958, "lon": 23.695, "dist_km": 2.8, "count": 2, "is_within_5km": true, "is_within_10km": true}, {"tk": "10442", "name": "Αθήνα", "lat": 37.993, "lon": 23.708, "dist_km": 3.44, "count": 2, "is_within_5km": true, "is_within_10km": true}, {"tk": "18532", "name": "Πειραιάς (Πασαλιμάνι)", "lat": 37.948, "lon": 23.652, "dist_km": 3.79, "count": 2, "is_within_5km": true, "is_within_10km": true}, {"tk": "10555", "name": "Αθήνα (Θησείο)", "lat": 37.976, "lon": 23.721, "dist_km": 4.1, "count": 2, "is_within_5km": true, "is_within_10km": true}, {"tk": "18543", "name": "Δραπετσώνα", "lat": 37.968, "lon": 23.628, "dist_km": 4.19, "count": 2, "is_within_5km": true, "is_within_10km": true}, {"tk": "18538", "name": "Πειραιάς (Ταμπούρια)", "lat": 37.955, "lon": 23.635, "dist_km": 4.24, "count": 2, "is_within_5km": true, "is_within_10km": true}, {"tk": "12131", "name": "Περιστέρι (Αγ. Αντώνιος)", "lat": 38.015, "lon": 23.692, "dist_km": 4.48, "count": 2, "is_within_5km": true, "is_within_10km": true}, {"tk": "10173", "name": "Αθήνα (Κέντρο)", "lat": 37.9886, "lon": 23.725, "dist_km": 4.62, "count": 2, "is_within_5km": true, "is_within_10km": true}, {"tk": "10558", "name": "Αθήνα (Ακρόπολη)", "lat": 37.968, "lon": 23.726, "dist_km": 4.65, "count": 2, "is_within_5km": true, "is_within_10km": true}, {"tk": "18757", "name": "Κερατσίνι (Αμφιάλη)", "lat": 37.9702, "lon": 23.6215, "dist_km": 4.69, "count": 2, "is_within_5km": true, "is_within_10km": true}, {"tk": "11741", "name": "Kουκάκι (Κάτω)", "lat": 37.962, "lon": 23.725, "dist_km": 4.75, "count": 2, "is_within_5km": true, "is_within_10km": true}, {"tk": "10560", "name": "Αθήνα (Ερμού)", "lat": 37.976, "lon": 23.731, "dist_km": 4.97, "count": 2, "is_within_5km": true, "is_within_10km": true}, {"tk": "12134", "name": "Περιστέρι (Μπουρνάζι)", "lat": 38.025, "lon": 23.678, "dist_km": 5.32, "count": 2, "is_within_5km": false, "is_within_10km": true}, {"tk": "18648", "name": "Δραπετσώνα", "lat": 37.95, "lon": 23.624, "dist_km": 5.35, "count": 2, "is_within_5km": false, "is_within_10km": true}, {"tk": "18537", "name": "Πειραιάς (Χατζηκυριάκειο)", "lat": 37.938, "lon": 23.632, "dist_km": 5.72, "count": 2, "is_within_5km": false, "is_within_10km": true}, {"tk": "10672", "name": "Αθήνα (Κολωνάκι Άνω)", "lat": 37.981, "lon": 23.743, "dist_km": 6.04, "count": 2, "is_within_5km": false, "is_within_10km": true}, {"tk": "11633", "name": "Παγκράτι (Βαρνάβα)", "lat": 37.965, "lon": 23.742, "dist_km": 6.09, "count": 2, "is_within_5km": false, "is_within_10km": true}, {"tk": "11141", "name": "Πατήσια (Άνω)", "lat": 38.012, "lon": 23.732, "dist_km": 6.37, "count": 2, "is_within_5km": false, "is_within_10km": true}, {"tk": "11528", "name": "Ιπποκράτειο", "lat": 37.981, "lon": 23.752, "dist_km": 6.82, "count": 2, "is_within_5km": false, "is_within_10km": true}, {"tk": "12137", "name": "Περιστέρι (Άσπρα Χώματα)", "lat": 38.041, "lon": 23.683, "dist_km": 7.14, "count": 2, "is_within_5km": false, "is_within_10km": true}, {"tk": "11635", "name": "Παγκράτι (Άνω)", "lat": 37.973, "lon": 23.759, "dist_km": 7.44, "count": 2, "is_within_5km": false, "is_within_10km": true}, {"tk": "11521", "name": "Αμπελόκηποι (Σταθμός)", "lat": 37.987, "lon": 23.759, "dist_km": 7.5, "count": 2, "is_within_5km": false, "is_within_10km": true}, {"tk": "11143", "name": "Προμπονά", "lat": 38.022, "lon": 23.745, "dist_km": 7.95, "count": 2, "is_within_5km": false, "is_within_10km": true}, {"tk": "11146", "name": "Γαλάτσι (Κέντρο)", "lat": 38.019, "lon": 23.751, "dist_km": 8.17, "count": 2, "is_within_5km": false, "is_within_10km": true}, {"tk": "15780", "name": "Ζωγράφου (ΕΜΠ)", "lat": 37.978, "lon": 23.784, "dist_km": 9.62, "count": 2, "is_within_5km": false, "is_within_10km": true}, {"tk": "16452", "name": "Αργυρούπολη (Άνω)", "lat": 37.915, "lon": 23.751, "dist_km": 9.65, "count": 2, "is_within_5km": false, "is_within_10km": true}, {"tk": "14121", "name": "Ηράκλειο (Νέο)", "lat": 38.048, "lon": 23.765, "dist_km": 11.19, "count": 2, "is_within_5km": false, "is_within_10km": false}, {"tk": "13671", "name": "Αχαρνές (Μενίδι)", "lat": 38.075, "lon": 23.735, "dist_km": 12.11, "count": 2, "is_within_5km": false, "is_within_10km": false}, {"tk": "14123", "name": "Ηράκλειο (Άνω)", "lat": 38.061, "lon": 23.778, "dist_km": 13.01, "count": 2, "is_within_5km": false, "is_within_10km": false}, {"tk": "13672", "name": "Αχαρνές (Κόκκινος Μύλος)", "lat": 38.085, "lon": 23.742, "dist_km": 13.37, "count": 2, "is_within_5km": false, "is_within_10km": false}, {"tk": "15122", "name": "Μαρούσι (Κοκκινιά)", "lat": 38.042, "lon": 23.805, "dist_km": 13.53, "count": 2, "is_within_5km": false, "is_within_10km": false}, {"tk": "13351", "name": "Φυλή", "lat": 38.1029, "lon": 23.669, "dist_km": 13.98, "count": 2, "is_within_5km": false, "is_within_10km": false}, {"tk": "15238", "name": "Χαλάνδρι (Πατήσι)", "lat": 38.028, "lon": 23.821, "dist_km": 14.04, "count": 2, "is_within_5km": false, "is_within_10km": false}, {"tk": "15237", "name": "Βριλήσσια (Πλατεία)", "lat": 38.035, "lon": 23.835, "dist_km": 15.48, "count": 2, "is_within_5km": false, "is_within_10km": false}, {"tk": "15354", "name": "Γέρακας (Γαργηττός)", "lat": 38.031, "lon": 23.855, "dist_km": 16.93, "count": 2, "is_within_5km": false, "is_within_10km": false}, {"tk": "14564", "name": "Κηφισιά (Νέα Κηφισιά)", "lat": 38.092, "lon": 23.832, "dist_km": 18.81, "count": 2, "is_within_5km": false, "is_within_10km": false}, {"tk": "19008", "name": "Πικέρμι", "lat": 38.012, "lon": 23.935, "dist_km": 23.17, "count": 2, "is_within_5km": false, "is_within_10km": false}, {"tk": "19004", "name": "Σπάτα / Αεροδρόμιο", "lat": 37.882, "lon": 23.978, "dist_km": 28.66, "count": 2, "is_within_5km": false, "is_within_10km": false}, {"tk": "19100", "name": "Μέγαρα", "lat": 37.982, "lon": 23.342, "dist_km": 29.13, "count": 2, "is_within_5km": false, "is_within_10km": false}, {"tk": "19015", "name": "Σαρωνίδα", "lat": 37.752, "lon": 23.912, "dist_km": 32.6, "count": 2, "is_within_5km": false, "is_within_10km": false}, {"tk": "19012", "name": "Ανάβυσσος (Παλαιά Φώκαια)", "lat": 37.721, "lon": 23.948, "dist_km": 37.27, "count": 2, "is_within_5km": false, "is_within_10km": false}, {"tk": "12243", "name": "Αιγάλεω (Μετρό)", "lat": 37.988, "lon": 23.671, "dist_km": 1.24, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "18121", "name": "Κορυδαλλός (Άνω)", "lat": 37.964, "lon": 23.671, "dist_km": 1.5, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "12241", "name": "Αιγάλεω (ΠΑΔΑ)", "lat": 37.9912, "lon": 23.6815, "dist_km": 1.68, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "18451", "name": "Νίκαια (Προσφυγικά)", "lat": 37.974, "lon": 23.655, "dist_km": 1.73, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "12351", "name": "Αγία Βαρβάρα", "lat": 37.989, "lon": 23.658, "dist_km": 1.94, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "12242", "name": "Αιγάλεω (Κέντρο)", "lat": 37.995, "lon": 23.674, "dist_km": 1.98, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "18120", "name": "Κορυδαλλός (Κέντρο)", "lat": 37.958, "lon": 23.678, "dist_km": 2.16, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "12244", "name": "Αιγάλεω (Λιούμη)", "lat": 37.9995, "lon": 23.669, "dist_km": 2.52, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "10436", "name": "Αθήνα", "lat": 37.985, "lon": 23.705, "dist_km": 2.83, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "18344", "name": "Μοσχάτο (Κέντρο)", "lat": 37.951, "lon": 23.685, "dist_km": 3.06, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "18540", "name": "Πειραιάς (Καμίνια)", "lat": 37.959, "lon": 23.648, "dist_km": 3.07, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "11851", "name": "Πετράλωνα (Κάτω)", "lat": 37.968, "lon": 23.711, "dist_km": 3.38, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "17672", "name": "Καλλιθέα (Κέντρο)", "lat": 37.958, "lon": 23.705, "dist_km": 3.44, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "18542", "name": "Πειραιάς (Αγ. Σοφιά)", "lat": 37.965, "lon": 23.638, "dist_km": 3.46, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "10445", "name": "Αθήνα", "lat": 37.981, "lon": 23.715, "dist_km": 3.59, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "18345", "name": "Μοσχάτο (Παραλία)", "lat": 37.945, "lon": 23.678, "dist_km": 3.6, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "18539", "name": "Πειραιάς (Μικρολίμανο)", "lat": 37.945, "lon": 23.668, "dist_km": 3.62, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "17674", "name": "Καλλιθέα (Χαροκόπου)", "lat": 37.961, "lon": 23.712, "dist_km": 3.76, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "17673", "name": "Καλλιθέα (Τζιτζιφιές)", "lat": 37.945, "lon": 23.692, "dist_km": 3.9, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "11742", "name": "Κουκάκι (Άνω)", "lat": 37.965, "lon": 23.721, "dist_km": 4.31, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "12461", "name": "Χαϊδάρι (Κέντρο)", "lat": 38.0135, "lon": 23.6542, "dist_km": 4.4, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "10552", "name": "Αθήνα (Ψυρρή)", "lat": 37.978, "lon": 23.725, "dist_km": 4.44, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "10551", "name": "Αθήνα (Μοναστηράκι)", "lat": 37.976, "lon": 23.726, "dist_km": 4.53, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "18545", "name": "Κερατσίνι (Αγ. Γεώργιος)", "lat": 37.969, "lon": 23.621, "dist_km": 4.76, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "10564", "name": "Αθήνα (Μητροπόλεως)", "lat": 37.975, "lon": 23.729, "dist_km": 4.8, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "10554", "name": "Αθήνα (Πλάκα)", "lat": 37.972, "lon": 23.731, "dist_km": 5.0, "count": 1, "is_within_5km": true, "is_within_10km": true}, {"tk": "10561", "name": "Αθήνα (Καραγιώργη)", "lat": 37.977, "lon": 23.732, "dist_km": 5.06, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "10433", "name": "Αθήνα", "lat": 37.987, "lon": 23.731, "dist_km": 5.09, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "10437", "name": "Αθήνα", "lat": 37.995, "lon": 23.728, "dist_km": 5.11, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "10553", "name": "Αθήνα (Σύνταγμα)", "lat": 37.975, "lon": 23.733, "dist_km": 5.15, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11743", "name": "Νέος Κόσμος (Κέντρο)", "lat": 37.958, "lon": 23.728, "dist_km": 5.17, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "10681", "name": "Αθήνα (Πανεπιστημίου)", "lat": 37.979, "lon": 23.734, "dist_km": 5.24, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "18756", "name": "Κερατσίνι (Άγιος Γεώργιος)", "lat": 37.9612, "lon": 23.6169, "dist_km": 5.34, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "10559", "name": "Αθήνα (Στάδιο)", "lat": 37.971, "lon": 23.735, "dist_km": 5.37, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "10562", "name": "Αθήνα (Συντάγματος)", "lat": 37.975, "lon": 23.736, "dist_km": 5.41, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "18755", "name": "Κερατσίνι (Κέντρο)", "lat": 37.9548, "lon": 23.6185, "dist_km": 5.49, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "10177", "name": "Αθήνα (Βουλή των Ελλήνων / Σύνταγμα)", "lat": 37.9755, "lon": 23.737, "dist_km": 5.5, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "18536", "name": "Πειραιάς (Φρεαττύδα)", "lat": 37.932, "lon": 23.648, "dist_km": 5.53, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "10680", "name": "Αθήνα (Σόλωνος)", "lat": 37.981, "lon": 23.738, "dist_km": 5.6, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "18533", "name": "Πειραιάς (Πειραϊκή)", "lat": 37.935, "lon": 23.639, "dist_km": 5.62, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11636", "name": "Μετς", "lat": 37.964, "lon": 23.738, "dist_km": 5.77, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "17562", "name": "Παλαιό Φάληρο (Φλοίσβος)", "lat": 37.931, "lon": 23.705, "dist_km": 5.8, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11251", "name": "Κυψέλη (Κάτω)", "lat": 37.998, "lon": 23.735, "dist_km": 5.8, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "10683", "name": "Αθήνα (Στρέφη)", "lat": 37.989, "lon": 23.739, "dist_km": 5.82, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "10671", "name": "Αθήνα (Κολωνάκι)", "lat": 37.978, "lon": 23.741, "dist_km": 5.85, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "17564", "name": "Παλαιό Φάληρο (Αμφιθέα)", "lat": 37.935, "lon": 23.719, "dist_km": 6.11, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11632", "name": "Παγκράτι (Άγιος Σπυρίδωνας)", "lat": 37.971, "lon": 23.744, "dist_km": 6.15, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "17342", "name": "Άγιος Δημήτριος (Ανθούπολη)", "lat": 37.941, "lon": 23.728, "dist_km": 6.19, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11252", "name": "Κυψέλη (Φωκίωνος)", "lat": 38.001, "lon": 23.739, "dist_km": 6.26, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "17234", "name": "Δάφνη (Μετρό)", "lat": 37.951, "lon": 23.738, "dist_km": 6.3, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11471", "name": "Γκύζη (Κάτω)", "lat": 37.989, "lon": 23.745, "dist_km": 6.33, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "17237", "name": "Δάφνη (Άνω)", "lat": 37.955, "lon": 23.742, "dist_km": 6.43, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "13121", "name": "Ίλιον (Νέα Λιόσια)", "lat": 38.031, "lon": 23.702, "dist_km": 6.46, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11476", "name": "Λυκαβηττός (Βόρεια)", "lat": 37.986, "lon": 23.748, "dist_km": 6.53, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11631", "name": "Παγκράτι (Προφήτης Ηλίας)", "lat": 37.968, "lon": 23.748, "dist_km": 6.54, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11144", "name": "Γαλάτσι (Κάτω)", "lat": 38.008, "lon": 23.738, "dist_km": 6.55, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "17235", "name": "Υμηττός", "lat": 37.958, "lon": 23.745, "dist_km": 6.56, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11255", "name": "Κυψέλη (Αγ. Ζώνη)", "lat": 38.003, "lon": 23.742, "dist_km": 6.59, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11361", "name": "Κυψέλη (Αγ. Αθανάσιος)", "lat": 38.002, "lon": 23.746, "dist_km": 6.86, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11253", "name": "Κυψέλη (Άνω)", "lat": 38.006, "lon": 23.744, "dist_km": 6.9, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11634", "name": "Παγκράτι (Κέντρο)", "lat": 37.969, "lon": 23.753, "dist_km": 6.96, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11473", "name": "Γκύζη (Άνω)", "lat": 37.995, "lon": 23.753, "dist_km": 7.18, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11142", "name": "Ριζούπολη", "lat": 38.018, "lon": 23.739, "dist_km": 7.26, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "13122", "name": "Ίλιον (Κέντρο)", "lat": 38.038, "lon": 23.708, "dist_km": 7.38, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11145", "name": "Γαλάτσι (Αγ. Γλυκερία)", "lat": 38.014, "lon": 23.748, "dist_km": 7.65, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "16122", "name": "Καισαριανή (Άνω)", "lat": 37.9657, "lon": 23.7618, "dist_km": 7.78, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11523", "name": "Αμπελόκηποι (Πανόρμου)", "lat": 37.994, "lon": 23.761, "dist_km": 7.82, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "13123", "name": "Ίλιον (Μιχελή)", "lat": 38.045, "lon": 23.701, "dist_km": 7.89, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "16232", "name": "Βύρωνας (Καρέας)", "lat": 37.965, "lon": 23.765, "dist_km": 8.07, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "16341", "name": "Ηλιούπολη (Κάτω)", "lat": 37.931, "lon": 23.748, "dist_km": 8.26, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11363", "name": "Πολύγωνο (Άνω)", "lat": 38.008, "lon": 23.762, "dist_km": 8.41, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "16346", "name": "Ηλιούπολη (Ηλιούπολη Β.)", "lat": 37.941, "lon": 23.759, "dist_km": 8.45, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "15772", "name": "Ζωγράφου (Κέντρο)", "lat": 37.975, "lon": 23.771, "dist_km": 8.48, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "14232", "name": "Νέα Ιωνία (Περισσός)", "lat": 38.031, "lon": 23.748, "dist_km": 8.8, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "11364", "name": "Πολύγωνο (Τουρκοβούνια)", "lat": 38.012, "lon": 23.768, "dist_km": 9.08, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "18863", "name": "Πέραμα", "lat": 37.9656, "lon": 23.5677, "dist_km": 9.43, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "14231", "name": "Νέα Ιωνία (Κέντρο)", "lat": 38.038, "lon": 23.755, "dist_km": 9.78, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "15451", "name": "Ψυχικό (Νέο)", "lat": 38.008, "lon": 23.781, "dist_km": 9.96, "count": 1, "is_within_5km": false, "is_within_10km": true}, {"tk": "16777", "name": "Ελληνικό (Αγία Παρασκευή)", "lat": 37.9046, "lon": 23.7423, "dist_km": 10.04, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "13501", "name": "Ζεφύρι (Νότιο)", "lat": 38.062, "lon": 23.715, "dist_km": 10.08, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "13461", "name": "Ζεφύρι", "lat": 38.0657, "lon": 23.7191, "dist_km": 10.59, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "14234", "name": "Νέα Ιωνία (Αλσούπολη)", "lat": 38.045, "lon": 23.762, "dist_km": 10.76, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "13561", "name": "Άγιοι Ανάργυροι", "lat": 38.068, "lon": 23.722, "dist_km": 10.93, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "15562", "name": "Παπάγου", "lat": 38.004, "lon": 23.799, "dist_km": 11.33, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "13562", "name": "Άγιοι Ανάργυροι (Μυκονιάτικα)", "lat": 38.074, "lon": 23.718, "dist_km": 11.42, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "13341", "name": "Άνω Λιόσια", "lat": 38.081, "lon": 23.682, "dist_km": 11.56, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "16673", "name": "Βούλα (Κάτω)", "lat": 37.892, "lon": 23.755, "dist_km": 11.83, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "13342", "name": "Ζεφύρι", "lat": 38.089, "lon": 23.675, "dist_km": 12.43, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "16561", "name": "Γλυφάδα (Άνω)", "lat": 37.895, "lon": 23.772, "dist_km": 12.53, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "16562", "name": "Γλυφάδα (Κάτω)", "lat": 37.885, "lon": 23.758, "dist_km": 12.61, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "15233", "name": "Χαλάνδρι (Άνω)", "lat": 38.031, "lon": 23.808, "dist_km": 13.15, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "13343", "name": "Φυλή", "lat": 38.098, "lon": 23.668, "dist_km": 13.44, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "15342", "name": "Αγία Παρασκευή (Σταυρός)", "lat": 38.019, "lon": 23.824, "dist_km": 13.92, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "13673", "name": "Αχαρνές (Θρακομακεδόνες)", "lat": 38.092, "lon": 23.751, "dist_km": 14.42, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "15126", "name": "Μαρούσι (Στούντιο A)", "lat": 38.059, "lon": 23.804, "dist_km": 14.55, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "15236", "name": "Βριλήσσια (Άνω)", "lat": 38.039, "lon": 23.831, "dist_km": 15.35, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "15127", "name": "Μαρούσι (Νέο Τέρμα)", "lat": 38.065, "lon": 23.811, "dist_km": 15.45, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "13674", "name": "Αχαρνές (Ολυμπιακό Χωριό)", "lat": 38.105, "lon": 23.762, "dist_km": 16.15, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "14562", "name": "Κηφισιά (Κέντρο)", "lat": 38.078, "lon": 23.818, "dist_km": 16.85, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "14671", "name": "Νέα Ερυθραία / Καστρί", "lat": 38.0926, "lon": 23.82, "dist_km": 18.1, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "19400", "name": "Κορωπί (Βιομηχανική)", "lat": 37.892, "lon": 23.855, "dist_km": 18.46, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "16671", "name": "Βουλιαγμένη (Λαιμός)", "lat": 37.815, "lon": 23.775, "dist_km": 20.08, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "19006", "name": "Νέα Πέραμος (Μεγάλο Πεύκο)", "lat": 38.0125, "lon": 23.4234, "dist_km": 22.33, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "14576", "name": "Διόνυσος", "lat": 38.105, "lon": 23.882, "dist_km": 23.08, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "14568", "name": "Κρυονέρι", "lat": 38.135, "lon": 23.855, "dist_km": 23.63, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "19010", "name": "Λούτσα / Αρτέμιδα", "lat": 37.968, "lon": 24.001, "dist_km": 28.66, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "19007", "name": "Μαραθώνας", "lat": 38.152, "lon": 23.955, "dist_km": 31.33, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "19017", "name": "Πόρτο Ράφτη", "lat": 37.885, "lon": 24.012, "dist_km": 31.34, "count": 1, "is_within_5km": false, "is_within_10km": false}, {"tk": "19500", "name": "Λαύριο (Βιομηχανικό)", "lat": 37.725, "lon": 24.041, "dist_km": 42.7, "count": 1, "is_within_5km": false, "is_within_10km": false}];
+
+        markersData.forEach(function(m) {
+            var color = '#0284c7';
+            var fillColor = '#38bdf8';
+            var r = 350 + (m.count * 180);
+
+            if (m.count === 1) {
+                color = '#0284c7';
+                fillColor = '#38bdf8';
+            } else if (m.count >= 2 && m.count <= 3) {
+                color = '#d97706';
+                fillColor = '#fbbf24';
+            } else if (m.count >= 4) {
+                color = '#be123c';
+                fillColor = '#f43f5e';
+            }
+
+            var circle = L.circle([m.lat, m.lon], {
+                color: color,
+                weight: 1.5,
+                fillColor: fillColor,
+                fillOpacity: 0.68,
+                radius: r
+            }).addTo(map);
+
+            circle.bindPopup(
+                "<div style='font-family:Roboto,sans-serif;'>" +
+                "<b style='font-size:14px; color:#0f172a;'>" + m.name + "</b><br/>" +
+                "<span style='color:#64748b;'>Τ.Κ.: " + m.tk + "</span><br/>" +
+                "<hr style='margin:6px 0; border:0; border-top:1px solid #e2e8f0;'/>" +
+                "👥 <b>Φοιτητές: " + m.count + "</b><br/>" +
+                "📏 Απόσταση από Campus: <b>" + m.dist_km + " km</b><br/>" +
+                (m.is_within_5km ? "<span style='color:#be123c; font-weight:700;'>🎯 Άμεση Ζώνη 5 km (High Boost)</span>" : (m.is_within_10km ? "<span style='color:#0284c7; font-weight:600;'>Ενδιάμεση Ζώνη 10 km</span>" : "<span style='color:#64748b;'>Ευρύτερη Αττική</span>")) +
+                "</div>"
+            );
+        });
+    </script>
+</body>
+</html>

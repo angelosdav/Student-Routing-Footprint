@@ -13,10 +13,18 @@ The system operates in two major phases:
 ## Features
 
 - **Mathematical Grade Modeling**: Simulates exam outcomes using an exponential probability curve ($P(x) = C \cdot e^{ax}$) tuned to empirical course difficulty with stochastic grading rules.
-- **Synthetic Population Generation**: Creates realistic student profiles with a 3-tier behavioral distribution and uniform geographic distribution across Attica.
+- **Two-Stage Spatial Population Generation**: Generates 300 student profiles combining broad metropolitan dispersion across Attica with localized residential clustering near the university campus.
 - **Multinomial Logit Choice Model**: Mathematically predicts mode selection based on travel time, wait time, access constraints, and alternative-specific constants.
 - **Interactive Web Dashboard**: Visualizes optimal routes, transport mode probabilities, and CO2 emissions between any Attica postal code and major university campuses using Leaflet.js.
 - **Local Routing Engine**: Uses local Dockerized OSRM and OTP instances for fast, real-world, and private public transit and driving route calculations.
+
+## Spatial Distribution & Student Density
+
+The geographic placement of the student cohort follows a realistic two-stage spatial sampling model across Attica. The baseline population is distributed uniformly across all 301 postal codes to maintain full metropolitan coverage, while a targeted cluster boost concentrates student density within a 5 km radius around the university campus.
+
+![Student Spatial Distribution Map](assets/student_distribution_map.png)
+
+This approach captures authentic student residential patterns, yielding higher density in adjacent municipalities such as Egaleo, Peristeri, Haidari, and Athens Central while preserving long-distance commute origins across greater Attica. An interactive map is available in `frontend/student_map.html`.
 
 ## Architecture
 
